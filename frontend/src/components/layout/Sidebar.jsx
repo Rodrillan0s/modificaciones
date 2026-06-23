@@ -226,6 +226,7 @@ export default function Sidebar({
               {openMenus.pacientes && (
                 <div className="mt-2 space-y-2">
                   <MenuButton title="Pacientes" />
+                  <MenuButton title="Odontograma" />
                 </div>
               )}
             </div>

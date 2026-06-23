@@ -31,7 +31,7 @@ import ReporteInventario from "../components/UIs/reportes/ReporteInventario";
 import ReporteCitas from "../components/UIs/citas/ReporteCitas";
 import ModuloConsultorios from "../components/UIs/consultorios/ModuloConsultorios";
 import ModuloServicios from "../components/UIs/servicios/ModuloServicios";
-
+import ModuloOdontograma from "../components/UIs/ModuloOdontograma";
 const API_URL = import.meta.env.VITE_API_URL;
 const ROLES = {
   ADMINISTRADOR: 1,
@@ -272,7 +272,9 @@ export default function Panel() {
 
           {/* PACIENTES */}
           {activeMenu === "Pacientes" && <ModuloPacientes />}
-
+          {activeMenu === "Odontograma" && (
+  <ModuloOdontograma />
+)}
           {/* CONTRASEÑA */}
           {activeMenu === "Cambiar contraseña" && <CambioPasswordUI />}
 
@@ -431,6 +433,7 @@ export default function Panel() {
             "Reporte Administración",
             "Reporte Inventario",
             "Reporte Finanzas",
+            "Odontograma",
           ].includes(activeMenu) && (
             <div className="h-full flex flex-col items-center justify-center opacity-20 text-center">
               <p className="text-4xl md:text-6xl mb-4">...</p>
