@@ -6,3 +6,4 @@ pandas
 gunicorn
 PyJWT
 flask-mail
+reportlab
