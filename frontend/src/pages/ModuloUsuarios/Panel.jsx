@@ -233,6 +233,29 @@ export default function Panel() {
                 />
               </svg>
             </button>
+            {activeMenu !== "Panel de Control" && (
+              <button
+                onClick={() => setActiveMenu("Panel de Control")}
+                className="flex items-center gap-1.5 px-3 py-1.5 rounded-full bg-emerald-50 hover:bg-emerald-100 text-[#148F77] text-xs font-black uppercase tracking-wider transition-all border border-emerald-100/50 shadow-sm active:scale-95 cursor-pointer mr-2"
+                title="Volver al Panel Principal"
+              >
+                <svg
+                  xmlns="http://www.w3.org/2000/svg"
+                  className="h-3.5 w-3.5"
+                  fill="none"
+                  viewBox="0 0 24 24"
+                  stroke="currentColor"
+                >
+                  <path
+                    strokeLinecap="round"
+                    strokeLinejoin="round"
+                    strokeWidth={3}
+                    d="M10 19l-7-7m0 0l7-7m-7 7h18"
+                  />
+                </svg>
+                <span>Volver al Dashboard</span>
+              </button>
+            )}
             <div className="text-[10px] md:text-xs font-black text-gray-300 uppercase tracking-widest italic">
               Clínica Alba /{" "}
               <span className="text-[#148F77] font-black">{activeMenu}</span>
@@ -245,20 +268,31 @@ export default function Panel() {
           {activeMenu === "Panel de Control" &&
             (userRolId === ROLES.ADMINISTRADOR ? (
               <DashboardAdmin
-                setView={(v) =>
-                  setActiveMenu(
-                    v === "bitacora" ? "Bitácora" : "Panel de Control",
-                  )
-                }
+                user={user}
+                dataMaster={dataMaster}
+                setView={setActiveMenu}
               />
             ) : userRolId === ROLES.ODONTOLOGO ? (
-              <DashboardOdontologo openModal={() => setShowModalCita(true)} />
+              <DashboardOdontologo
+                user={user}
+                dataMaster={dataMaster}
+                setView={setActiveMenu}
+                openModal={() => setShowModalCita(true)}
+              />
             ) : userRolId === ROLES.RECEPCIONISTA ? (
               <DashboardRecepcionista
+                user={user}
+                dataMaster={dataMaster}
+                setView={setActiveMenu}
                 openModal={() => setShowModalCita(true)}
               />
             ) : (
-              <DashboardPaciente openModal={() => setShowModalCita(true)} />
+              <DashboardPaciente
+                user={user}
+                dataMaster={dataMaster}
+                setView={setActiveMenu}
+                openModal={() => setShowModalCita(true)}
+              />
             ))}
 
           {/* GESTIÓN DE USUARIOS */}

@@ -8,6 +8,31 @@ from ..services.bitacora import Bitacora
 inventario_routes = Blueprint('inventario_routes', __name__)
 
 
+def _get_log_context():
+    """Helper local para obtener id_usuario e id_sesion y evitar boilerplate."""
+    data = request.get_json(silent=True) or {}
+    id_u = data.get('id_usuario') or request.args.get('id_usuario')
+    id_s = data.get('id_sesion') or request.args.get('id_sesion')
+    
+    if not id_u:
+        from ..classes.security import Security
+        user = Security.decode_token()
+        if user:
+            id_u = user.get("id_usuario")
+            
+    if id_u and not id_s:
+        try:
+            query = f"SELECT id_sesion FROM {Config.SCHEMA}.t_sesiones WHERE id_usuario = %s AND estado = 'ACTIVA' ORDER BY fecha_inicio DESC LIMIT 1"
+            res = db.execute_query(query, (id_u,), fetchone=True)
+            if res:
+                id_s = res[0]
+        except Exception:
+            pass
+            
+    return id_u, id_s
+
+
+
 def ejecutar_query_reporte_filtrado(tipo, expirable, estado, f_inicio, f_fin, params_extra):
     id_material = params_extra.get('id_material', '')
     id_proveedor = params_extra.get('id_proveedor', '')
@@ -100,8 +125,10 @@ def registrar_material():
 
         query = f"INSERT INTO {Config.SCHEMA}.t_materiales (nombre_material, precio, expirable,precio_venta) VALUES (%s, %s, %s,%s)"
         db.execute_query(query, (str(nombre), float(precio), bool(expirable), float(precio_venta)), commit=True)
-        Bitacora.registrar("INVENTARIO", "CREATE", f"Material creado: {nombre}")
+        id_u, id_s = _get_log_context()
+        Bitacora.registrar("INVENTARIO", "CREATE", f"Material creado: {nombre}", id_u, id_s)
         return jsonify({"success": True, "message": "Material registrado con éxito"}), 201
+
     except Exception as e:
         return jsonify({"success": False, "message": str(e)}), 500
 
@@ -124,8 +151,10 @@ def modificar_material(id_material):
         
         query = f"UPDATE {Config.SCHEMA}.t_materiales SET nombre_material = %s, precio = %s, expirable = %s WHERE id_material = %s"
         db.execute_query(query, (str(nombre), float(precio), bool(expirable), int(id_material)), commit=True)
-        Bitacora.registrar("INVENTARIO", "UPDATE", f"Material actualizado: {id_material}, {nombre}")
+        id_u, id_s = _get_log_context()
+        Bitacora.registrar("INVENTARIO", "UPDATE", f"Material actualizado: {id_material}, {nombre}", id_u, id_s)
         return jsonify({"success": True, "message": "Material actualizado con éxito"}), 200
+
     except Exception as e:
         return jsonify({"success": False, "message": str(e)}), 500
 
@@ -143,8 +172,10 @@ def eliminar_material(id_material):
             return jsonify({"success": False, "message": "Material no encontrado"}), 404        
         
         db.execute_query(f"DELETE FROM {Config.SCHEMA}.t_materiales WHERE id_material = %s", (int(id_material),), commit=True)        
-        Bitacora.registrar("INVENTARIO", "DELETE", f"Material eliminado: {id_material}, {result[0]}")
+        id_u, id_s = _get_log_context()
+        Bitacora.registrar("INVENTARIO", "DELETE", f"Material eliminado: {id_material}, {result[0]}", id_u, id_s)
         return jsonify({"success": True, "message": "Material eliminado correctamente"}), 200
+
     except Exception as e:
         err_msg = str(e)
         if "foreign key" in err_msg.lower() or "llave foránea" in err_msg.lower():
@@ -192,8 +223,10 @@ def registrar_entrada_inventario():
         params = (int(id_material), int(cantidad), fecha_caducidad or None, fecha_fabricacion or None, int(id_proveedor) if id_proveedor else None)
         db.execute_query(sql, params, commit=True)
 
-        Bitacora.registrar("INVENTARIO", "ENTRADA", f"Abastecimiento ID {id_material}. Cantidad: {cantidad}. Nombre: {nombre_material}")
+        id_u, id_s = _get_log_context()
+        Bitacora.registrar("INVENTARIO", "ENTRADA", f"Abastecimiento ID {id_material}. Cantidad: {cantidad}. Nombre: {nombre_material}", id_u, id_s)
         return jsonify({"success": True, "message": "Entrada registrada correctamente"}), 201
+
     except Exception as e:
         return jsonify({"success": False, "message": str(e)}), 500
 
@@ -217,8 +250,10 @@ def registrar_proveedor_express():
         query = f"INSERT INTO {Config.SCHEMA}.t_proveedor (nombre_proveedor, telefono) VALUES (%s, %s)"
         db.execute_query(query, (str(nombre_proveedor).upper(), str(telefono) if telefono else None), commit=True)
 
-        Bitacora.registrar("INVENTARIO", "CREATE", f"Proveedor registrado en caliente: {nombre_proveedor}")
+        id_u, id_s = _get_log_context()
+        Bitacora.registrar("INVENTARIO", "CREATE", f"Proveedor registrado en caliente: {nombre_proveedor}", id_u, id_s)
         return jsonify({"success": True, "message": "Proveedor registrado correctamente"}), 201
+
     except Exception as e:
         return jsonify({"success": False, "message": str(e)}), 500
 
@@ -312,8 +347,10 @@ def registrar_salida_inventario():
         sql = f"CALL {Config.SCHEMA}.p_registrar_salida_almacen(%s, %s)"
         db.execute_query(sql, (int(id_lote), int(cantidad)), commit=True)
 
-        Bitacora.registrar("INVENTARIO", "SALIDA", f"Baja de stock. Lote #{id_lote}. Cantidad: {cantidad}. Motivo: {motivo.upper()}")
+        id_u, id_s = _get_log_context()
+        Bitacora.registrar("INVENTARIO", "SALIDA", f"Baja de stock. Lote #{id_lote}. Cantidad: {cantidad}. Motivo: {motivo.upper()}", id_u, id_s)
         return jsonify({"success": True, "message": "Salida procesada con éxito. Stock descontado y Kardex actualizado mediante SP."}), 201
+
     except Exception as e:
         error_msg = str(e).split("CONTEXT:")[0] if "CONTEXT:" in str(e) else str(e)
         return jsonify({"success": False, "message": error_msg}), 400
@@ -338,8 +375,10 @@ def ajustar_inventario_almacen():
         sql = f"CALL {Config.SCHEMA}.p_ajustar_inventario(%s, %s, %s)"
         db.execute_query(sql, (int(id_lote), int(nuevo_stock), str(motivo)), commit=True)
 
-        Bitacora.registrar("INVENTARIO", "AJUSTE", f"Auditoría física Lote #{id_lote}. Stock adjusted a: {nuevo_stock} u. Motivo: {motivo.upper()}")
+        id_u, id_s = _get_log_context()
+        Bitacora.registrar("INVENTARIO", "AJUSTE", f"Auditoría física Lote #{id_lote}. Stock adjusted a: {nuevo_stock} u. Motivo: {motivo.upper()}", id_u, id_s)
         return jsonify({"success": True, "message": "Inventario adjusted con éxito."}), 200
+
     except Exception as e:
         error_msg = str(e).split("CONTEXT:")[0] if "CONTEXT:" in str(e) else str(e)
         return jsonify({"success": False, "message": error_msg}), 400

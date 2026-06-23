@@ -15,6 +15,8 @@ export default function Bitacora() {
   const [logs, setLogs] = useState([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState('');
+  const [page, setPage] = useState(1);
+  const [hasMore, setHasMore] = useState(false);
   
   const [filters, setFilters] = useState({
     nombre: '', 
@@ -23,7 +25,7 @@ export default function Bitacora() {
     fecha_fin: ''
   });
 
-  const fetchLogs = async () => {
+  const fetchLogs = async (targetPage = page) => {
     setLoading(true);
     setError('');
     try {
@@ -32,6 +34,8 @@ export default function Bitacora() {
       if (filters.modulo) params.append('modulo', filters.modulo);
       if (filters.fecha_inicio) params.append('fecha_inicio', filters.fecha_inicio);
       if (filters.fecha_fin) params.append('fecha_fin', filters.fecha_fin);
+      params.append('page', targetPage);
+      params.append('limit', 20);
 
       const res = await fetch(`${API_URL}/bitacora?${params.toString()}`, {
         headers: { Authorization: `Bearer ${localStorage.getItem("token")}` }
@@ -40,6 +44,7 @@ export default function Bitacora() {
       
       if (data.success) {
         setLogs(data.data);
+        setHasMore(data.has_more || false);
       } else {
         setError(sanitizarError(data.message));
       }
@@ -51,13 +56,18 @@ export default function Bitacora() {
   };
 
   useEffect(() => {
-    fetchLogs();
-  }, []);
+    fetchLogs(page);
+  }, [page]);
 
   const handleSearch = (e) => {
     e.preventDefault();
-    fetchLogs();
+    if (page === 1) {
+      fetchLogs(1);
+    } else {
+      setPage(1);
+    }
   };
+
 
   const getActionBadge = (accion) => {
     const styles = {
@@ -66,6 +76,11 @@ export default function Bitacora() {
       'DELETE': 'bg-rose-100 text-rose-700',
       'CREATE': 'bg-blue-100 text-blue-700',
       'UPDATE': 'bg-amber-100 text-amber-700',
+      'ENTRADA': 'bg-emerald-100 text-emerald-700',
+      'SALIDA': 'bg-orange-100 text-orange-700',
+      'AJUSTE': 'bg-purple-100 text-purple-700',
+      'REGISTRAR_PAGO': 'bg-teal-100 text-teal-700',
+      'REVERTIR_PAGO': 'bg-red-100 text-red-700',
       'default': 'bg-gray-100 text-gray-700'
     };
     return styles[accion] || styles.default;
@@ -88,12 +103,14 @@ export default function Bitacora() {
             onChange={(e) => setFilters({...filters, modulo: e.target.value})}
           >
             <option value="">Todos</option>
-            <option value="AUTH">AUTH</option>
             <option value="CITAS">CITAS</option>
-            <option value="USUARIOS">USUARIOS</option>
-            <option value="SECURITY">SECURITY</option>
+            <option value="INVENTARIO">INVENTARIO</option>
+            <option value="PAGOS">PAGOS</option>
+            <option value="SEGURIDAD">SEGURIDAD</option>
+            <option value="ADMINISTRACION">ADMINISTRACION</option>
           </select>
         </div>
+
 
         <div className="space-y-1">
           <label className="text-[9px] font-black text-gray-400 uppercase ml-2">Nombre</label>
@@ -201,6 +218,32 @@ export default function Bitacora() {
           </table>
         </div>
       </div>
+
+      {/* CONTROLES DE PAGINACIÓN */}
+      <div className="mt-6 flex justify-between items-center bg-white p-4 rounded-[1.5rem] border border-gray-50 shadow-md">
+        <button
+          type="button"
+          disabled={page === 1 || loading}
+          onClick={() => setPage((prev) => Math.max(1, prev - 1))}
+          className="px-4 py-2 bg-gray-100 text-[#2A5C4D] text-[10px] font-black uppercase tracking-widest rounded-xl hover:bg-gray-200 transition-all disabled:opacity-50 disabled:cursor-not-allowed"
+        >
+          ← Anterior
+        </button>
+        
+        <span className="text-[10px] font-black text-[#2A5C4D] uppercase tracking-wider">
+          Página {page}
+        </span>
+        
+        <button
+          type="button"
+          disabled={!hasMore || loading}
+          onClick={() => setPage((prev) => prev + 1)}
+          className="px-4 py-2 bg-[#148F77] text-white text-[10px] font-black uppercase tracking-widest rounded-xl hover:bg-[#117A65] transition-all disabled:opacity-50 disabled:cursor-not-allowed"
+        >
+          Siguiente →
+        </button>
+      </div>
+
     </div>
   );
-}
+}

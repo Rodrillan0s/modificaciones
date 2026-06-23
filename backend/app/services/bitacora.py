@@ -26,8 +26,8 @@ class Bitacora:
             print(f"--- ERROR CRÍTICO BITÁCORA --- {e}")
 
     @staticmethod
-    def listar(filtros=None):
-        """Consulta el historial formateando la fecha a Día/Mes/Año."""
+    def listar(filtros=None, page=1, limit=20):
+        """Consulta el historial formateando la fecha a Día/Mes/Año con filtros y paginación."""
         filtros = filtros or {}
         query = f"""
             SELECT b.id_bitacora, p.nombre, b.modulo, b.accion, 
@@ -43,12 +43,42 @@ class Bitacora:
             t = f"%{filtros['nombre']}%"; params.extend([t, t])
         
         if filtros.get('modulo'):
-            query += " AND b.modulo = %s"; params.append(filtros['modulo'])
+            modulo_mapping = {
+                'CITAS': ['CITAS', 'CITAS_SERVICIOS'],
+                'INVENTARIO': ['INVENTARIO'],
+                'PAGOS': ['PAGOS', 'FINANZAS'],
+                'SEGURIDAD': ['AUTH', 'LOGIN', 'LOGOUT', 'SECURITY', 'SECURIDAD'],
+                'ADMINISTRACION': ['USUARIOS', 'PROCEDIMIENTOS', 'ODONTOGRAMA', 'CONSULTORIOS', 'PERSONAL', 'SERVICIOS', 'PACIENTE', 'ADMIN']
+            }
+            mapped_modulos = modulo_mapping.get(filtros['modulo'])
+            if mapped_modulos:
+                placeholders = ", ".join(["%s"] * len(mapped_modulos))
+                query += f" AND b.modulo IN ({placeholders})"
+                params.extend(mapped_modulos)
+            else:
+                query += " AND b.modulo = %s"
+                params.append(filtros['modulo'])
 
-        query += " ORDER BY b.fecha_registro DESC LIMIT 200"
-        res = db.execute_query(query, tuple(params), fetchall=True)
+        if filtros.get('fecha_inicio'):
+            query += " AND b.fecha_registro >= %s"
+            params.append(f"{filtros['fecha_inicio']} 00:00:00")
+            
+        if filtros.get('fecha_fin'):
+            query += " AND b.fecha_registro <= %s"
+            params.append(f"{filtros['fecha_fin']} 23:59:59")
+
+        offset = (page - 1) * limit
+        query += " ORDER BY b.fecha_registro DESC LIMIT %s OFFSET %s"
+        params.extend([limit + 1, offset])
         
-        return [{
+        res = db.execute_query(query, tuple(params), fetchall=True) or []
+        
+        has_more = False
+        if len(res) > limit:
+            has_more = True
+            res = res[:limit]
+        
+        logs_list = [{
             'id': r[0],
             'usuario': r[1] or r[8] or 'SISTEMA',
             'modulo': r[2],
@@ -58,4 +88,6 @@ class Bitacora:
             'fecha': r[5].strftime('%d/%m/%Y %H:%M:%S') if r[5] else None,
             'metadata': r[6],
             'id_sesion': r[7]
-        } for r in (res or [])]
+        } for r in res]
+        
+        return logs_list, has_more

@@ -359,9 +359,13 @@ def consultar_bitacora():
             'fecha_fin': request.args.get('fecha_fin')
         }
         
-        data = Bitacora.listar(filtros)
+        page = int(request.args.get('page', 1))
+        limit = int(request.args.get('limit', 20))
         
-        return jsonify({"success": True, "data": data}), 200
+        data, has_more = Bitacora.listar(filtros, page, limit)
+        
+        return jsonify({"success": True, "data": data, "has_more": has_more}), 200
+
 
     except Exception as e:
         return jsonify({"success": False, "message": str(e)}), 500

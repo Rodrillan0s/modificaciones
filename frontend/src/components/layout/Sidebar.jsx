@@ -69,6 +69,26 @@ export default function Sidebar({
   // USER DATA
   // =========================
 
+  const getDecodedToken = () => {
+    try {
+      const token = localStorage.getItem("token");
+      if (!token) return null;
+      const base64Url = token.split(".")[1];
+      const base64 = base64Url.replace(/-/g, "+").replace(/_/g, "/");
+      const jsonPayload = decodeURIComponent(
+        atob(base64)
+          .split("")
+          .map((c) => "%" + ("00" + c.charCodeAt(0).toString(16)).slice(-2))
+          .join("")
+      );
+      return JSON.parse(jsonPayload);
+    } catch (e) {
+      return null;
+    }
+  };
+
+  const decodedToken = getDecodedToken();
+
   const currentUserData =
     dataMaster?.usuarios?.find(
       (u) =>
@@ -77,6 +97,7 @@ export default function Sidebar({
     ) || user;
 
   const usernameDisplay =
+    decodedToken?.username ||
     currentUserData?.nombre_usuario ||
     currentUserData?.correo?.split("@")[0] ||
     "usuario";
@@ -132,7 +153,16 @@ export default function Sidebar({
       >
         {/* HEADER */}
         <div className="p-8 flex justify-between items-center border-b border-gray-50">
-          <img src={logo} alt="Alba" className="h-10" />
+          <img
+            src={logo}
+            alt="Alba"
+            className="h-10 cursor-pointer hover:opacity-80 transition-opacity"
+            onClick={() => {
+              setActiveMenu("Panel de Control");
+              setIsOpen(false);
+            }}
+            title="Ir al Dashboard"
+          />
 
           <button
             onClick={() => setIsOpen(false)}
@@ -159,24 +189,24 @@ export default function Sidebar({
         <div className="p-6 flex flex-col items-center border-b border-gray-50 bg-gray-50/10">
           <div
             className={`w-16 h-16 rounded-[1.8rem] flex items-center justify-center text-xl font-black mb-3 shadow-lg ${
-              userRolId === 1
+              Number(decodedToken?.role || userRolId) === 1
                 ? "bg-orange-50 text-orange-600"
                 : "bg-[#148F77] text-white"
             }`}
           >
-            {currentUserData?.nombre?.charAt(0) || "U"}
+            {(decodedToken?.name || currentUserData?.nombre || "U").charAt(0).toUpperCase()}
           </div>
 
-          <h3 className="text-[#2A5C4D] font-black text-[11px] text-center leading-tight px-4 uppercase">
-            {currentUserData?.nombre || "Usuario"}
+          <h3 className="text-[#2A5C4D] font-black text-xs text-center leading-tight px-2 uppercase max-w-[200px] break-words">
+            {decodedToken?.name || currentUserData?.nombre || "Usuario"}
           </h3>
 
-          <p className="text-gray-400 text-[10px] font-bold mt-1 tracking-widest lowercase transition-all">
+          <p className="text-gray-400 text-[10px] font-bold mt-1.5 tracking-wider lowercase">
             @{usernameDisplay}
           </p>
 
-          <p className="text-[#148F77] text-[8px] font-black uppercase mt-3 bg-emerald-50 px-3 py-1.5 rounded-full shadow-sm border border-emerald-100">
-            {getRolName(userRolId)}
+          <p className="text-[#148F77] text-[8px] font-black uppercase mt-3.5 bg-emerald-50 px-3 py-1.5 rounded-full shadow-sm border border-emerald-100">
+            {getRolName(decodedToken?.role || userRolId)}
           </p>
         </div>
 

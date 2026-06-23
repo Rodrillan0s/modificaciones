@@ -1,14 +1,20 @@
 import urllib.request
 import json
 import traceback
+import re
 from ..config import Config
 
-def send_email_brevo(to_email, subject, html_content, to_name=None):
+def send_email_brevo(to_email, subject, html_content, to_name=None, attachments=None):
     """
     Sends an email using Brevo's HTTPS REST API (v3/smtp/email).
     Avoids SMTP port blocking by using HTTPS port 443.
     """
+    if not to_email or not re.match(r"^[^@]+@[^@]+\.[^@]+$", str(to_email).strip()):
+        print(f"[EMAIL SENDER] Cancelled sending email. Invalid email format: '{to_email}'")
+        return False
+
     api_key = Config.MAIL_PASSWORD  # Brevo SMTP password doubles as API key
+    print(f"[EMAIL SENDER DEBUG] Key in use: {api_key[:15]}...{api_key[-5:] if api_key else ''}")
     sender_email = Config.MAIL_DEFAULT_SENDER or "clinica.dental.alba@outlook.com"
 
     if not api_key:
@@ -31,6 +37,9 @@ def send_email_brevo(to_email, subject, html_content, to_name=None):
         "subject": subject,
         "htmlContent": html_content
     }
+
+    if attachments:
+        payload["attachment"] = attachments
 
     try:
         req_data = json.dumps(payload).encode('utf-8')

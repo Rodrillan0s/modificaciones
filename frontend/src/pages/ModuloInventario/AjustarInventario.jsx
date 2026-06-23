@@ -483,13 +483,14 @@ export default function AjustarInventario() {
                       ref={nuevoStockInputRef}
                       type="number"
                       required
-                      min="1"
-                      max={metaAudit.stock_teorico}
-                      placeholder={`Máximo a retener: ${metaAudit.stock_teorico}`}
+                      min="0"
+                      max={metaAudit.stock_inicial}
+                      placeholder={`Máximo a registrar (original): ${metaAudit.stock_inicial}`}
                       value={form.nuevo_stock}
                       onChange={(e) => setForm({ ...form, nuevo_stock: e.target.value })}
                       className="w-full bg-gray-50 border border-gray-200 text-gray-800 text-xs px-4 py-3 rounded-xl focus:outline-none focus:border-[#148F77] font-semibold"
                     />
+
                 </div>
 
                 {/* ACCIONES DE LA FICHA */}

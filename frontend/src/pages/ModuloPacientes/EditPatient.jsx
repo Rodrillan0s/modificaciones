@@ -217,14 +217,15 @@ export default function EditPatient({
 
       }
 
+      const token = localStorage.getItem("token");
       const res = await fetch(
         `${API_URL}/pacientes/${paciente.id}`,
         {
           method: 'PUT',
 
           headers: {
-            'Content-Type':
-              'application/json'
+            'Content-Type': 'application/json',
+            Authorization: `Bearer ${token}`
           },
 
           body: JSON.stringify(cambios)

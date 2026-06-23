@@ -10,6 +10,31 @@ import traceback
 
 finanzas_routes = Blueprint('finanzas_routes', __name__)
 
+
+def _get_log_context():
+    """Helper local para obtener id_usuario e id_sesion y evitar boilerplate."""
+    data = request.get_json(silent=True) or {}
+    id_u = data.get('id_usuario') or request.args.get('id_usuario')
+    id_s = data.get('id_sesion') or request.args.get('id_sesion')
+    
+    if not id_u:
+        from ..classes.security import Security
+        user = Security.decode_token()
+        if user:
+            id_u = user.get("id_usuario")
+            
+    if id_u and not id_s:
+        try:
+            query = f"SELECT id_sesion FROM {Config.SCHEMA}.t_sesiones WHERE id_usuario = %s AND estado = 'ACTIVA' ORDER BY fecha_inicio DESC LIMIT 1"
+            res = db.execute_query(query, (id_u,), fetchone=True)
+            if res:
+                id_s = res[0]
+        except Exception:
+            pass
+            
+    return id_u, id_s
+
+
 def get_paypal_access_token():
     url = f"{Config.PAYPAL_BASE_URL}/v1/oauth2/token"
     auth_str = f"{Config.PAYPAL_CLIENT_ID}:{Config.PAYPAL_CLIENT_SECRET}"
@@ -61,7 +86,38 @@ def enviar_comprobante_email(id_cita, monto_bob, metodo_pago, p_fecha, correo_en
         )
         nombre_paciente = paciente_db[0] if paciente_db else "Paciente"
 
+        # Obtener el concepto de la cita (procedimiento o fallback a servicio)
+        proc_query = f"""
+            SELECT p.descripcion 
+            FROM {Config.SCHEMA}.t_citas c
+            JOIN {Config.SCHEMA}.t_procedimiento p ON p.id_procedimiento = c.id_procedimiento
+            WHERE c.id_cita = %s
+        """
+        proc_res = db.execute_query(proc_query, (id_cita,), fetchone=True)
+        concepto = "Abono / Cuota Dental Integrada"
+        if proc_res and proc_res[0]:
+            concepto = proc_res[0]
+        else:
+            serv_query = f"""
+                SELECT s.nombre 
+                FROM {Config.SCHEMA}.t_cita_servicio cs
+                JOIN {Config.SCHEMA}.t_servicio s ON cs.id_servicio = s.id_servicio
+                WHERE cs.id_cita = %s
+                LIMIT 1
+            """
+            serv_res = db.execute_query(serv_query, (id_cita,), fetchone=True)
+            if serv_res and serv_res[0]:
+                concepto = serv_res[0]
+
+        items = [{
+            "nombre": concepto,
+            "precio": float(monto_bob),
+            "tipo": "PROCEDIMIENTO"
+        }]
+
         monto_usd = round(monto_bob / Config.PAYPAL_EXCHANGE_RATE, 2)
+        
+        # Generar HTML del cuerpo del correo
         html_content = generar_html_comprobante(
             nombre_paciente, 
             id_cita, 
@@ -69,9 +125,35 @@ def enviar_comprobante_email(id_cita, monto_bob, metodo_pago, p_fecha, correo_en
             metodo_pago, 
             monto_bob, 
             monto_usd, 
-            saldo_actual
+            saldo_actual,
+            items
         )
-        send_email_brevo(correo_envio, "Recibo de Pago - Clínica Alba", html_content, nombre_paciente)
+        
+        # Generar el PDF adjunto
+        try:
+            from ..utils.pdf_generator import generate_receipt_pdf
+            pdf_base64 = generate_receipt_pdf(
+                nombre_paciente=nombre_paciente,
+                id_cita=id_cita,
+                fecha_pago=p_fecha.strftime("%d/%m/%Y %H:%M:%S"),
+                metodo_pago=metodo_pago,
+                monto_bob=monto_bob,
+                monto_usd=monto_usd,
+                saldo_restante_bob=saldo_actual,
+                items=items
+            )
+            attachments = [
+                {
+                    "content": pdf_base64,
+                    "name": f"Comprobante_Pago_Cita_{id_cita}.pdf"
+                }
+            ]
+        except Exception as pdf_err:
+            print("Error al generar PDF:", pdf_err)
+            traceback.print_exc()
+            attachments = None
+
+        send_email_brevo(correo_envio, "Recibo de Pago - Clínica Alba", html_content, nombre_paciente, attachments=attachments)
     except Exception as e:
         print("Error en enviar_comprobante_email:", e)
 
@@ -152,6 +234,15 @@ def obtener_saldo(id_cita):
         )
         costo_materiales = float(costo_materiales[0]) if (costo_materiales and costo_materiales[0] is not None) else 0.0
 
+        # Obtener costo de servicios agregados a la cita
+        costo_servicios_query = db.execute_query(
+            f"SELECT COALESCE(SUM(precio), 0) FROM {Config.SCHEMA}.t_cita_servicio WHERE id_cita = %s",
+            (id_cita,),
+            fetchone=True
+        )
+        costo_servicios = float(costo_servicios_query[0]) if (costo_servicios_query and costo_servicios_query[0] is not None) else 0.0
+        costo_total = costo_materiales + costo_servicios
+
         saldo_db = db.execute_query(
             f"SELECT saldo_inicial, saldo_actual FROM {Config.SCHEMA}.t_saldo WHERE id_cita = %s",
             (id_cita,),
@@ -172,7 +263,7 @@ def obtener_saldo(id_cita):
             )
         else:
             saldo_inicial = float(saldo_db[0]) if saldo_db[0] is not None else 0.0
-            descuento = max(0.0, costo_materiales - saldo_inicial)
+            descuento = max(0.0, costo_total - saldo_inicial)
             db.execute_query(
                 f"CALL {Config.SCHEMA}.p_generar_saldo_cita(%s, %s)",
                 (id_cita, descuento),
@@ -184,8 +275,8 @@ def obtener_saldo(id_cita):
                 fetchone=True
             )
 
-        saldo_inicial = float(saldo_db[0]) if (saldo_db and saldo_db[0] is not None) else costo_materiales
-        saldo_actual = float(saldo_db[1]) if (saldo_db and saldo_db[1] is not None) else costo_materiales
+        saldo_inicial = float(saldo_db[0]) if (saldo_db and saldo_db[0] is not None) else costo_total
+        saldo_actual = float(saldo_db[1]) if (saldo_db and saldo_db[1] is not None) else costo_total
 
         facturas_db = db.execute_query(
             f"""
@@ -222,12 +313,36 @@ def obtener_saldo(id_cita):
         nombre_paciente = cita_db[1] if cita_db else "Paciente Desconocido"
         id_paciente = cita_db[2] if cita_db else None
 
+        # Obtener el concepto de la cita (procedimiento o fallback a servicio)
+        proc_query = f"""
+            SELECT p.descripcion 
+            FROM {Config.SCHEMA}.t_citas c
+            JOIN {Config.SCHEMA}.t_procedimiento p ON p.id_procedimiento = c.id_procedimiento
+            WHERE c.id_cita = %s
+        """
+        proc_res = db.execute_query(proc_query, (id_cita,), fetchone=True)
+        nombre_procedimiento = "Abono / Cuota Dental Integrada"
+        if proc_res and proc_res[0]:
+            nombre_procedimiento = proc_res[0]
+        else:
+            serv_query = f"""
+                SELECT s.nombre 
+                FROM {Config.SCHEMA}.t_cita_servicio cs
+                JOIN {Config.SCHEMA}.t_servicio s ON cs.id_servicio = s.id_servicio
+                WHERE cs.id_cita = %s
+                LIMIT 1
+            """
+            serv_res = db.execute_query(serv_query, (id_cita,), fetchone=True)
+            if serv_res and serv_res[0]:
+                nombre_procedimiento = serv_res[0]
+
         return jsonify({
             "success": True,
             "data": {
                 "id_cita": id_cita,
                 "id_paciente": id_paciente,
                 "nombre_paciente": nombre_paciente,
+                "nombre_procedimiento": nombre_procedimiento,
                 "fecha_agendamiento": fecha_agendamiento,
                 "costo_materiales_bob": costo_materiales,
                 "descuento_bob": descuento,
@@ -399,7 +514,55 @@ def capturar_paypal_orden():
 
         enviar_comprobante_email(id_cita, monto_bob, "PAYPAL", p_fecha, correo_envio)
 
-        return jsonify({"success": True, "message": "Pago registrado y comprobante enviado."}), 200
+        try:
+            from ..services.bitacora import Bitacora
+            id_u, id_s = _get_log_context()
+            Bitacora.registrar(
+                "PAGOS",
+                "REGISTRAR_PAGO",
+                f"Pago online (PayPal) registrado. Cita ID: {id_cita}. Monto: {monto_bob} BOB. Razón Social: {nombre_factura or 'PAGO PAYPAL'}",
+                id_u,
+                id_s
+            )
+        except Exception as b_err:
+            print("Error al registrar bitacora de pago paypal:", b_err)
+
+        # Obtener la factura recién creada
+        factura_rec = db.execute_query(
+            f"""
+            SELECT id_factura, nombre, metodo_pago, fecha_factura, monto_cancelado 
+            FROM {Config.SCHEMA}.t_facturas 
+            WHERE id_cita = %s 
+            ORDER BY id_factura DESC LIMIT 1
+            """,
+            (id_cita,),
+            fetchone=True
+        )
+        receipt_data = None
+        if factura_rec:
+            saldo_db = db.execute_query(
+                f"SELECT saldo_actual FROM {Config.SCHEMA}.t_saldo WHERE id_cita = %s",
+                (id_cita,),
+                fetchone=True
+            )
+            saldo_actual = float(saldo_db[0]) if (saldo_db and saldo_db[0] is not None) else 0.0
+            receipt_data = {
+                "id_factura": factura_rec[0],
+                "id_cita": id_cita,
+                "nombre_factura": factura_rec[1],
+                "metodo_pago": factura_rec[2],
+                "fecha_factura": factura_rec[3].strftime("%d/%m/%y %H:%M") if factura_rec[3] else None,
+                "monto_bob": float(factura_rec[4]) if factura_rec[4] is not None else 0.0,
+                "monto_usd": round((float(factura_rec[4]) if factura_rec[4] is not None else 0.0) / Config.PAYPAL_EXCHANGE_RATE, 2),
+                "saldo_restante_bob": saldo_actual
+            }
+
+        return jsonify({
+            "success": True, 
+            "message": "Pago registrado y comprobante enviado.",
+            "receipt": receipt_data
+        }), 200
+
     except Exception as e:
         traceback.print_exc()
         return jsonify({"success": False, "message": str(e)}), 500
@@ -440,7 +603,55 @@ def registrar_pago_manual():
 
         enviar_comprobante_email(id_cita, monto_bob, metodo_pago, p_fecha, correo_envio)
 
-        return jsonify({"success": True, "message": "Pago manual registrado y comprobante enviado."}), 200
+        try:
+            from ..services.bitacora import Bitacora
+            id_u, id_s = _get_log_context()
+            Bitacora.registrar(
+                "PAGOS",
+                "REGISTRAR_PAGO",
+                f"Pago manual registrado. Cita ID: {id_cita}. Monto: {monto_bob} BOB. Razón Social: {nombre_factura or metodo_pago}. Método: {metodo_pago}",
+                id_u,
+                id_s
+            )
+        except Exception as b_err:
+            print("Error al registrar bitacora de pago manual:", b_err)
+
+        # Obtener la factura recién creada
+        factura_rec = db.execute_query(
+            f"""
+            SELECT id_factura, nombre, metodo_pago, fecha_factura, monto_cancelado 
+            FROM {Config.SCHEMA}.t_facturas 
+            WHERE id_cita = %s 
+            ORDER BY id_factura DESC LIMIT 1
+            """,
+            (id_cita,),
+            fetchone=True
+        )
+        receipt_data = None
+        if factura_rec:
+            saldo_db = db.execute_query(
+                f"SELECT saldo_actual FROM {Config.SCHEMA}.t_saldo WHERE id_cita = %s",
+                (id_cita,),
+                fetchone=True
+            )
+            saldo_actual = float(saldo_db[0]) if (saldo_db and saldo_db[0] is not None) else 0.0
+            receipt_data = {
+                "id_factura": factura_rec[0],
+                "id_cita": id_cita,
+                "nombre_factura": factura_rec[1],
+                "metodo_pago": factura_rec[2],
+                "fecha_factura": factura_rec[3].strftime("%d/%m/%y %H:%M") if factura_rec[3] else None,
+                "monto_bob": float(factura_rec[4]) if factura_rec[4] is not None else 0.0,
+                "monto_usd": round((float(factura_rec[4]) if factura_rec[4] is not None else 0.0) / Config.PAYPAL_EXCHANGE_RATE, 2),
+                "saldo_restante_bob": saldo_actual
+            }
+
+        return jsonify({
+            "success": True, 
+            "message": "Pago manual registrado y comprobante enviado.",
+            "receipt": receipt_data
+        }), 200
+
     except Exception as e:
         traceback.print_exc()
         return jsonify({"success": False, "message": str(e)}), 500
@@ -473,13 +684,17 @@ def revertir_pago(id_factura):
         # 3. Registrar en bitácora
         try:
             from ..services.bitacora import Bitacora
+            id_u, id_s = _get_log_context()
             Bitacora.registrar(
-                "FINANZAS",
+                "PAGOS",
                 "REVERTIR_PAGO",
-                f"Pago revertido ID: {id_factura}. Monto: {monto} BOB. Cita ID: {id_cita}. Método: {metodo}"
+                f"Pago revertido ID: {id_factura}. Monto: {monto} BOB. Cita ID: {id_cita}. Método: {metodo}",
+                id_u,
+                id_s
             )
         except Exception as b_err:
             print("Error al registrar bitacora de reversion:", b_err)
+
 
         return jsonify({
             "success": True, 

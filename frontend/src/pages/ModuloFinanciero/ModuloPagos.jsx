@@ -8,7 +8,7 @@ export default function ModuloPagos({ dataMaster, user }) {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
   const [searchTerm, setSearchTerm] = useState("");
-  
+
   // Detalle de la cita seleccionada para pagar
   const [selectedCita, setSelectedCita] = useState(null);
   const [saldoDetails, setSaldoDetails] = useState(null);
@@ -36,6 +36,20 @@ export default function ModuloPagos({ dataMaster, user }) {
   // Descuentos (solo para personal)
   const [discountAmount, setDiscountAmount] = useState("");
   const [applyingDiscount, setApplyingDiscount] = useState(false);
+  const [modalError, setModalError] = useState("");
+  const [modalSuccess, setModalSuccess] = useState("");
+
+  const showModalError = (msg) => {
+    setModalError(msg);
+    setModalSuccess("");
+    document.querySelector(".modal-body-container")?.scrollTo({ top: 0, behavior: "smooth" });
+  };
+
+  const showModalSuccess = (msg) => {
+    setModalSuccess(msg);
+    setModalError("");
+    document.querySelector(".modal-body-container")?.scrollTo({ top: 0, behavior: "smooth" });
+  };
 
   const userRolId = user?.rol ? Number(user.rol) : null;
   const isPatient = userRolId >= 5;
@@ -104,7 +118,7 @@ export default function ModuloPagos({ dataMaster, user }) {
         setSaldoDetails(data.data);
         setPaymentAmount(data.data.saldo_actual_bob.toString());
         setDiscountAmount(data.data.descuento_bob.toString());
-        
+
         // Buscar el correo del paciente si es posible
         if (!isPatient && dataMaster?.usuarios) {
           const u = dataMaster.usuarios.find(userObj => userObj.id_persona === data.data.id_paciente);
@@ -115,7 +129,7 @@ export default function ModuloPagos({ dataMaster, user }) {
           setReceiptEmail(user?.correo || "");
         }
       } else {
-        alert("Error al cargar detalles de saldo: " + data.message);
+        showModalError("Error al cargar detalles de saldo: " + data.message);
       }
     } catch (err) {
       console.error(err);
@@ -133,6 +147,8 @@ export default function ModuloPagos({ dataMaster, user }) {
     setBillingNit("");
     setBillingPhone("");
     setIsInstallment(false);
+    setModalError("");
+    setModalSuccess("");
     fetchCitaSaldo(cita.id_cita);
   };
 
@@ -140,6 +156,8 @@ export default function ModuloPagos({ dataMaster, user }) {
     setSelectedCita(null);
     setSaldoDetails(null);
     setAmountConfirmed(false);
+    setModalError("");
+    setModalSuccess("");
     fetchCitasSaldos();
   };
 
@@ -147,6 +165,8 @@ export default function ModuloPagos({ dataMaster, user }) {
   const handleApplyDiscount = async () => {
     if (!selectedCita) return;
     setApplyingDiscount(true);
+    setModalError("");
+    setModalSuccess("");
     try {
       const res = await fetch(`${API_URL}/finanzas/saldos/generar`, {
         method: "POST",
@@ -161,13 +181,14 @@ export default function ModuloPagos({ dataMaster, user }) {
       });
       const data = await res.json();
       if (data.success) {
-        alert("Descuento aplicado correctamente y saldo recalculado.");
+        showModalSuccess("Descuento aplicado correctamente y saldo recalculado.");
         fetchCitaSaldo(selectedCita.id_cita);
+        fetchCitasSaldos(); // Actualizar lista principal inmediatamente
       } else {
-        alert("Error al aplicar descuento: " + data.message);
+        showModalError("Error al aplicar descuento: " + data.message);
       }
     } catch (err) {
-      alert("Error de conexión.");
+      showModalError("Error de conexión al aplicar el descuento.");
     } finally {
       setApplyingDiscount(false);
     }
@@ -180,15 +201,21 @@ export default function ModuloPagos({ dataMaster, user }) {
 
     // Validar datos de facturación requeridos
     if (!billingName.trim()) {
-      alert("Debe ingresar el Nombre / Razón Social para la factura.");
+      showModalError("Debe ingresar el Nombre / Razón Social para la factura.");
       return;
     }
     if (!billingNit.trim()) {
-      alert("Debe ingresar el CI / NIT para la factura.");
+      showModalError("Debe ingresar el CI / NIT para la factura.");
+      return;
+    }
+    if (receiptEmail.trim() && !/^[^@]+@[^@]+\.[^@]+$/.test(receiptEmail.trim())) {
+      showModalError("Debe ingresar un correo válido para enviar el comprobante (ej: usuario@correo.com).");
       return;
     }
 
     setProcessing(true);
+    setModalError("");
+    setModalSuccess("");
     try {
       const parts = [billingName.trim()];
       parts.push(`NIT: ${billingNit.trim()}`);
@@ -213,13 +240,17 @@ export default function ModuloPagos({ dataMaster, user }) {
       });
       const data = await res.json();
       if (data.success) {
-        alert("¡Pago manual registrado exitosamente! Comprobante enviado por correo.");
+        showModalSuccess("¡Pago manual registrado exitosamente! Comprobante enviado por correo.");
         fetchCitaSaldo(selectedCita.id_cita);
+        fetchCitasSaldos();
+        if (data.receipt) {
+          setSelectedReceipt(data.receipt);
+        }
       } else {
-        alert("Error al registrar pago: " + data.message);
+        showModalError("Error al registrar pago: " + data.message);
       }
     } catch (err) {
-      alert("Error de conexión al procesar.");
+      showModalError("Error de conexión al procesar el pago manual.");
     } finally {
       setProcessing(false);
     }
@@ -229,7 +260,8 @@ export default function ModuloPagos({ dataMaster, user }) {
     if (!window.confirm(`¿Está seguro de que desea revertir este pago de ${montoBob.toFixed(2)} BOB? Esta acción es irreversible y restaurará la deuda correspondiente.`)) {
       return;
     }
-
+    setModalError("");
+    setModalSuccess("");
     try {
       const res = await fetch(`${API_URL}/finanzas/eliminar-pago/${idFactura}`, {
         method: "DELETE",
@@ -239,14 +271,14 @@ export default function ModuloPagos({ dataMaster, user }) {
       });
       const data = await res.json();
       if (data.success) {
-        alert("Pago revertido con éxito. El saldo de la cita ha sido restaurado.");
+        showModalSuccess("Pago revertido con éxito. El saldo de la cita ha sido restaurado.");
         fetchCitaSaldo(selectedCita.id_cita);
         fetchCitasSaldos();
       } else {
-        alert("Error al revertir el pago: " + data.message);
+        showModalError("Error al revertir el pago: " + data.message);
       }
     } catch (err) {
-      alert("Error de conexión al intentar revertir el pago.");
+      showModalError("Error de conexión al intentar revertir el pago.");
     }
   };
 
@@ -258,24 +290,28 @@ export default function ModuloPagos({ dataMaster, user }) {
 
   const handleConfirmAmount = () => {
     if (!paymentAmount || Number(paymentAmount) <= 0) {
-      alert("Ingrese un monto válido a pagar.");
+      showModalError("Ingrese un monto válido a pagar.");
       return;
     }
     if (saldoDetails && Number(paymentAmount) > saldoDetails.saldo_actual_bob + 0.01) {
-      alert("El monto a pagar no puede superar el saldo pendiente.");
+      showModalError("El monto a pagar no puede superar el saldo pendiente.");
       return;
     }
     // Validar datos de facturación requeridos
     if (!billingName.trim()) {
-      alert("Debe ingresar el Nombre / Razón Social para la factura.");
+      showModalError("Debe ingresar el Nombre / Razón Social para la factura.");
       return;
     }
     if (!billingNit.trim()) {
-      alert("Debe ingresar el CI / NIT para la factura.");
+      showModalError("Debe ingresar el CI / NIT para la factura.");
+      return;
+    }
+    if (receiptEmail.trim() && !/^[^@]+@[^@]+\.[^@]+$/.test(receiptEmail.trim())) {
+      showModalError("Debe ingresar un correo válido para enviar el comprobante (ej: usuario@correo.com).");
       return;
     }
     setAmountConfirmed(true);
-    
+
     // Si es paciente o staff, renderizar botones después de confirmar
     setTimeout(() => {
       renderPaypalButtons();
@@ -303,12 +339,12 @@ export default function ModuloPagos({ dataMaster, user }) {
 
   const initPaypalButtons = () => {
     if (!window.paypal || !document.getElementById("paypal-button-container")) return;
-    
+
     // Evitar renderizado doble
     document.getElementById("paypal-button-container").innerHTML = "";
 
     window.paypal.Buttons({
-      createOrder: async function() {
+      createOrder: async function () {
         try {
           const res = await fetch(`${API_URL}/finanzas/paypal/crear-orden`, {
             method: "POST",
@@ -323,7 +359,7 @@ export default function ModuloPagos({ dataMaster, user }) {
           });
           const orderData = await res.json();
           if (!orderData.success) {
-            alert("Error al crear la orden de PayPal: " + orderData.message);
+            showModalError("Error al crear la orden de PayPal: " + orderData.message);
             throw new Error(orderData.message);
           }
           return orderData.order_id;
@@ -332,7 +368,7 @@ export default function ModuloPagos({ dataMaster, user }) {
           throw err;
         }
       },
-      onApprove: async function(data) {
+      onApprove: async function (data) {
         setProcessing(true);
         try {
           const parts = [billingName.trim() || "PAGO PAYPAL"];
@@ -360,21 +396,25 @@ export default function ModuloPagos({ dataMaster, user }) {
           });
           const captureData = await res.json();
           if (captureData.success) {
-            alert("¡Pago con PayPal procesado exitosamente! Recibo enviado al correo.");
+            showModalSuccess("¡Pago con PayPal procesado exitosamente! Recibo enviado al correo.");
             setAmountConfirmed(false);
             fetchCitaSaldo(selectedCita.id_cita);
+            fetchCitasSaldos();
+            if (captureData.receipt) {
+              setSelectedReceipt(captureData.receipt);
+            }
           } else {
-            alert("Error al capturar el pago: " + captureData.message);
+            showModalError("Error al capturar el pago: " + captureData.message);
           }
         } catch (err) {
-          alert("Error de conexión al capturar el pago.");
+          showModalError("Error de conexión al capturar el pago.");
         } finally {
           setProcessing(false);
         }
       },
-      onError: function(err) {
+      onError: function (err) {
         console.error("PayPal Error:", err);
-        alert("Ocurrió un error con la pasarela de PayPal.");
+        showModalError("Ocurrió un error con la pasarela de PayPal.");
       }
     }).render("#paypal-button-container");
   };
@@ -394,7 +434,7 @@ export default function ModuloPagos({ dataMaster, user }) {
     const patientName = (c.nombre_paciente || getPacienteName(c.id_paciente)).toLowerCase();
     const docName = (c.nombre_odontologo || getOdontologoName(c.id_personal)).toLowerCase();
     const search = searchTerm.toLowerCase();
-    
+
     const matchesSearch = (
       c.id_cita.toString().includes(search) ||
       patientName.includes(search) ||
@@ -518,11 +558,10 @@ export default function ModuloPagos({ dataMaster, user }) {
                 key={filter}
                 type="button"
                 onClick={() => setStatusFilter(filter)}
-                className={`px-4 py-2.5 rounded-xl text-[10px] font-black uppercase tracking-wider transition-all ${
-                  statusFilter === filter
+                className={`px-4 py-2.5 rounded-xl text-[10px] font-black uppercase tracking-wider transition-all ${statusFilter === filter
                     ? "bg-white text-[#2A5C4D] shadow-sm"
                     : "text-gray-400 hover:text-gray-600"
-                }`}
+                  }`}
               >
                 {filter === "TODOS" ? "Todas" : filter === "PENDIENTES" ? "Pendientes" : "Pagadas"}
               </button>
@@ -620,8 +659,8 @@ export default function ModuloPagos({ dataMaster, user }) {
                               </div>
                               <div className="flex items-center gap-2 mt-1">
                                 <div className="w-16 bg-gray-100 rounded-full h-1 overflow-hidden">
-                                  <div 
-                                    className="bg-[#148F77] h-full rounded-full transition-all duration-500" 
+                                  <div
+                                    className="bg-[#148F77] h-full rounded-full transition-all duration-500"
                                     style={{ width: `${pct}%` }}
                                   ></div>
                                 </div>
@@ -636,11 +675,10 @@ export default function ModuloPagos({ dataMaster, user }) {
                       <td className="py-4 px-6 text-center">
                         <button
                           onClick={() => handleSelectCita(cita)}
-                          className={`px-5 py-2.5 rounded-xl text-[10px] font-black uppercase tracking-widest transition-all shadow-sm ${
-                            isPaid
+                          className={`px-5 py-2.5 rounded-xl text-[10px] font-black uppercase tracking-widest transition-all shadow-sm ${isPaid
                               ? "bg-gray-100 text-gray-400 hover:bg-gray-200"
                               : "bg-[#148F77] text-white hover:bg-[#0f6b59]"
-                          }`}
+                            }`}
                         >
                           {isPaid ? "Historial" : isPatient ? "Pagar" : "Cobrar"}
                         </button>
@@ -677,14 +715,28 @@ export default function ModuloPagos({ dataMaster, user }) {
             </div>
 
             {/* Modal Body */}
-            <div className="flex-1 overflow-y-auto p-8 lg:p-10 space-y-8">
+            <div className="flex-1 overflow-y-auto p-8 lg:p-10 space-y-8 modal-body-container">
+
+              {modalError && (
+                <div className="p-4 bg-red-50 border-l-4 border-red-500 text-red-700 text-xs font-black uppercase rounded-r-xl animate-fade-in flex justify-between items-center">
+                  <span>{modalError}</span>
+                  <button onClick={() => setModalError("")} className="text-red-700 hover:text-red-950 font-black ml-2 text-[10px]">✕</button>
+                </div>
+              )}
+              {modalSuccess && (
+                <div className="p-4 bg-emerald-50 border-l-4 border-[#148F77] text-[#148F77] text-xs font-black uppercase rounded-r-xl animate-fade-in flex justify-between items-center">
+                  <span>{modalSuccess}</span>
+                  <button onClick={() => setModalSuccess("")} className="text-[#148F77] hover:text-[#0f6b59] font-black ml-2 text-[10px]">✕</button>
+                </div>
+              )}
+
               {loadingDetails ? (
                 <div className="flex justify-center items-center py-20">
                   <div className="w-12 h-12 border-4 border-[#148F77] border-t-transparent rounded-full animate-spin"></div>
                 </div>
               ) : saldoDetails ? (
                 <div className="grid grid-cols-1 lg:grid-cols-2 gap-8">
-                  
+
                   {/* LEFT: Balance status & History */}
                   <div className="space-y-6">
                     <div className="bg-[#F4F9F9] p-6 rounded-[2.5rem] border border-emerald-50 space-y-4">
@@ -736,7 +788,7 @@ export default function ModuloPagos({ dataMaster, user }) {
                           const s_act = parseFloat(saldoDetails.saldo_actual_bob ?? 0);
                           const tot_p = s_ini - s_act;
                           const pct = s_ini > 0 ? Math.min(100, Math.max(0, (tot_p / s_ini) * 100)) : (s_act <= 0 ? 100 : 0);
-                          
+
                           return (
                             <>
                               <div className="flex justify-between items-center text-[9px] font-black uppercase tracking-wider text-[#2A5C4D]">
@@ -746,7 +798,7 @@ export default function ModuloPagos({ dataMaster, user }) {
                                 </span>
                               </div>
                               <div className="w-full bg-gray-100 rounded-full h-2 overflow-hidden">
-                                <div 
+                                <div
                                   className="bg-gradient-to-r from-[#148F77] to-emerald-500 h-full rounded-full transition-all duration-500"
                                   style={{ width: `${pct}%` }}
                                 ></div>
@@ -760,9 +812,9 @@ export default function ModuloPagos({ dataMaster, user }) {
                       </div>
                     </div>
 
-                    {/* Descuentos (Solo Staff) */}
-                    {!isPatient && (
-                      <div className="bg-white p-6 rounded-[2.5rem] border border-gray-100 shadow-sm">
+                    {/* Descuentos (Solo Staff, oculto si ya está pagada) */}
+                    {!isPatient && saldoDetails.saldo_actual_bob > 0 && (
+                      <div className="bg-white p-6 rounded-[2.5rem] border border-gray-100 shadow-sm animate-fade-in">
                         <h4 className="text-xs font-black text-[#2A5C4D] uppercase tracking-widest mb-3">
                           Aplicar Descuento a Cita (BOB)
                         </h4>
@@ -859,27 +911,25 @@ export default function ModuloPagos({ dataMaster, user }) {
                       </div>
                     ) : (
                       <div className="bg-white border border-gray-100 p-6 rounded-[2.5rem] shadow-md space-y-6">
-                        
+
                         {/* Selector de Método de Pago (Solo personal) */}
                         {!isPatient && (
                           <div className="flex bg-gray-100 p-1.5 rounded-2xl">
                             <button
                               type="button"
                               onClick={() => { setPaymentMode("manual"); setAmountConfirmed(false); }}
-                              className={`flex-1 py-2.5 rounded-xl text-[10px] font-black uppercase tracking-wider transition-all ${
-                                paymentMode === "manual" ? "bg-white text-[#2A5C4D] shadow-sm" : "text-gray-400 hover:text-gray-600"
-                              }`}
+                              className={`flex-1 py-2.5 rounded-xl text-[10px] font-black uppercase tracking-wider transition-all ${paymentMode === "manual" ? "bg-white text-[#2A5C4D] shadow-sm" : "text-gray-400 hover:text-gray-600"
+                                }`}
                             >
                               Pago Manual (Efectivo)
                             </button>
                             <button
                               type="button"
                               onClick={() => { setPaymentMode("paypal"); setAmountConfirmed(false); }}
-                              className={`flex-1 py-2.5 rounded-xl text-[10px] font-black uppercase tracking-wider transition-all ${
-                                paymentMode === "paypal" ? "bg-white text-[#2A5C4D] shadow-sm" : "text-gray-400 hover:text-gray-600"
-                              }`}
+                              className={`flex-1 py-2.5 rounded-xl text-[10px] font-black uppercase tracking-wider transition-all ${paymentMode === "paypal" ? "bg-white text-[#2A5C4D] shadow-sm" : "text-gray-400 hover:text-gray-600"
+                                }`}
                             >
-                              PayPal Sandbox
+                              PayPal
                             </button>
                           </div>
                         )}
@@ -903,9 +953,8 @@ export default function ModuloPagos({ dataMaster, user }) {
                                   setIsInstallment(false);
                                   setPaymentAmount(saldoDetails.saldo_actual_bob.toString());
                                 }}
-                                className={`flex-1 py-2.5 rounded-xl text-[10px] font-black uppercase tracking-wider transition-all ${
-                                  !isInstallment ? "bg-white text-[#2A5C4D] shadow-sm" : "text-gray-400 hover:text-gray-600"
-                                }`}
+                                className={`flex-1 py-2.5 rounded-xl text-[10px] font-black uppercase tracking-wider transition-all ${!isInstallment ? "bg-white text-[#2A5C4D] shadow-sm" : "text-gray-400 hover:text-gray-600"
+                                  }`}
                               >
                                 Pago Completo
                               </button>
@@ -915,9 +964,8 @@ export default function ModuloPagos({ dataMaster, user }) {
                                 onClick={() => {
                                   setIsInstallment(true);
                                 }}
-                                className={`flex-1 py-2.5 rounded-xl text-[10px] font-black uppercase tracking-wider transition-all ${
-                                  isInstallment ? "bg-white text-[#2A5C4D] shadow-sm" : "text-gray-400 hover:text-gray-600"
-                                }`}
+                                className={`flex-1 py-2.5 rounded-xl text-[10px] font-black uppercase tracking-wider transition-all ${isInstallment ? "bg-white text-[#2A5C4D] shadow-sm" : "text-gray-400 hover:text-gray-600"
+                                  }`}
                               >
                                 Pagar en Cuotas / Abono
                               </button>
@@ -939,7 +987,7 @@ export default function ModuloPagos({ dataMaster, user }) {
                             />
                             {isInstallment && (
                               <p className="text-[9px] text-[#148F77] font-bold ml-2">
-                                *(Puedes realizar abonos parciales/cuotas ingresando un monto menor al saldo actual)*
+                                *(Puedes realizar abonos parciales/cuotas ingresando un monto menor al saldo total)*
                               </p>
                             )}
                             <p className="text-[10px] text-gray-400 font-bold ml-2">
@@ -968,7 +1016,7 @@ export default function ModuloPagos({ dataMaster, user }) {
                               </label>
                               <input
                                 type="text"
-                                placeholder="Ej: 12345678"
+                                placeholder=""
                                 value={billingNit}
                                 onChange={(e) => setBillingNit(e.target.value)}
                                 className="w-full p-4 bg-gray-50 border-2 border-gray-100 rounded-2xl text-xs font-bold text-gray-700 focus:outline-none focus:border-[#148F77]"
@@ -981,7 +1029,7 @@ export default function ModuloPagos({ dataMaster, user }) {
                               </label>
                               <input
                                 type="text"
-                                placeholder="Ej: 77123456 (Opcional)"
+                                placeholder="Ej: (Opcional)"
                                 value={billingPhone}
                                 onChange={(e) => setBillingPhone(e.target.value)}
                                 className="w-full p-4 bg-gray-50 border-2 border-gray-100 rounded-2xl text-xs font-bold text-gray-700 focus:outline-none focus:border-[#148F77]"
@@ -1026,7 +1074,7 @@ export default function ModuloPagos({ dataMaster, user }) {
                               disabled={processing || !paymentAmount}
                               className="w-full py-4 bg-[#2A5C4D] text-white rounded-2xl font-black text-xs uppercase tracking-widest shadow-lg hover:bg-[#1f453a] transition-all disabled:opacity-50"
                             >
-                              {processing ? "Procesando..." : "Registrar Pago Manual"}
+                              {processing ? "Procesando..." : "Registrar Pago"}
                             </button>
                           ) : (
                             <div className="space-y-4">

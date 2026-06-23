@@ -61,6 +61,44 @@ function numeroALetras(num) {
 export default function Comprobante({ receipt, onClose }) {
   if (!receipt) return null;
 
+  const [nombreProcedimiento, setNombreProcedimiento] = React.useState("");
+  const [loadingItems, setLoadingItems] = React.useState(true);
+  const [saldoRestante, setSaldoRestante] = React.useState(receipt.saldo_restante_bob);
+
+  React.useEffect(() => {
+    let active = true;
+    if (receipt && receipt.id_cita) {
+      setLoadingItems(true);
+      fetch(`${import.meta.env.VITE_API_URL || "http://localhost:5000/api"}/finanzas/saldos/${receipt.id_cita}`, {
+        headers: {
+          Authorization: `Bearer ${localStorage.getItem("token")}`
+        }
+      })
+      .then(res => res.json())
+      .then(resData => {
+        if (active && resData.success && resData.data) {
+          if (resData.data.nombre_procedimiento) {
+            setNombreProcedimiento(resData.data.nombre_procedimiento);
+          }
+          if (resData.data.saldo_actual_bob !== undefined) {
+            setSaldoRestante(resData.data.saldo_actual_bob);
+          }
+        }
+      })
+      .catch(err => {
+        console.error("Error fetching receipt details:", err);
+      })
+      .finally(() => {
+        if (active) setLoadingItems(false);
+      });
+    } else {
+      setLoadingItems(false);
+    }
+    return () => {
+      active = false;
+    };
+  }, [receipt]);
+
   const handlePrint = () => {
     window.print();
   };
@@ -94,7 +132,7 @@ export default function Comprobante({ receipt, onClose }) {
       `*Cita ID:* #${receipt.id_cita}\n` +
       `*Monto Cancelado:* ${receipt.monto_bob ? receipt.monto_bob.toFixed(2) : "0.00"} BOB (~$${receipt.monto_usd ? receipt.monto_usd.toFixed(2) : "0.00"} USD)\n` +
       `*Método de Pago:* ${receipt.metodo_pago}\n` +
-      (receipt.saldo_restante_bob !== undefined ? `*Saldo Pendiente:* ${receipt.saldo_restante_bob.toFixed(2)} BOB\n` : "") +
+      (saldoRestante !== undefined ? `*Saldo Pendiente:* ${saldoRestante.toFixed(2)} BOB\n` : "") +
       `*Fecha:* ${receipt.fecha_factura || "N/A"}\n\n` +
       `*¡Muchas gracias por su preferencia!*`;
       
@@ -104,11 +142,26 @@ export default function Comprobante({ receipt, onClose }) {
 
   const literalMonto = numeroALetras(receipt.monto_bob || 0);
 
+  const displayItems = [
+    {
+      nombre: nombreProcedimiento || "Abono / Cuota Dental Integrada",
+      precio: receipt.monto_bob || 0.0,
+      tipo: "PROCEDIMIENTO"
+    }
+  ];
+
   return (
-    <div className="fixed inset-0 bg-[#2A5C4D]/90 backdrop-blur-md z-[120] flex items-center justify-center p-4 overflow-y-auto">
+    <div 
+      onClick={onClose}
+      className="fixed inset-0 bg-[#2A5C4D]/90 backdrop-blur-md z-[120] flex items-center justify-center p-4 overflow-y-auto cursor-pointer"
+    >
       {/* Estilos CSS dinámicos para forzar que solo se imprima el comprobante */}
       <style>{`
         @media print {
+          * {
+            -webkit-print-color-adjust: exact !important;
+            print-color-adjust: exact !important;
+          }
           body * {
             visibility: hidden !important;
           }
@@ -124,6 +177,7 @@ export default function Comprobante({ receipt, onClose }) {
             border: none !important;
             margin: 0 !important;
             padding: 0 !important;
+            border-radius: 0 !important;
           }
           .no-print {
             display: none !important;
@@ -133,7 +187,8 @@ export default function Comprobante({ receipt, onClose }) {
 
       <div 
         id="printable-receipt"
-        className="bg-white rounded-[3rem] w-full max-w-2xl shadow-2xl overflow-hidden animate-fade-in-up border border-gray-100 flex flex-col my-8"
+        onClick={(e) => e.stopPropagation()}
+        className="bg-white rounded-[3rem] w-full max-w-2xl shadow-2xl overflow-hidden animate-fade-in-up border border-gray-100 flex flex-col my-8 cursor-default"
       >
         {/* Cabecera Tipo Factura */}
         <div className="p-8 bg-gradient-to-br from-gray-50 to-white border-b border-gray-100 relative">
@@ -239,22 +294,34 @@ export default function Comprobante({ receipt, onClose }) {
                   </tr>
                 </thead>
                 <tbody className="font-medium text-gray-700 divide-y divide-gray-100">
-                  <tr>
-                    <td className="py-4 px-4 text-center text-gray-400 font-mono">1</td>
-                    <td className="py-4 px-4 leading-relaxed">
-                      <p className="font-bold text-gray-800">Abono / Cuota Dental Integrada</p>
-                      <p className="text-[9px] text-gray-400">Tratamiento e insumos correspondientes a la cita médica #{receipt.id_cita}</p>
-                    </td>
-                    <td className="py-4 px-4 text-center">1</td>
-                    <td className="py-4 px-4 text-right font-mono">{receipt.monto_bob ? receipt.monto_bob.toFixed(2) : "0.00"}</td>
-                    <td className="py-4 px-4 text-right font-mono font-bold text-gray-800">
-                      {receipt.monto_bob ? receipt.monto_bob.toFixed(2) : "0.00"}
-                    </td>
-                  </tr>
+                  {loadingItems ? (
+                    <tr>
+                      <td colSpan="5" className="py-8 text-center text-gray-400 font-semibold italic">
+                        Cargando detalles de la cita...
+                      </td>
+                    </tr>
+                  ) : (
+                    displayItems.map((item, idx) => (
+                      <tr key={idx}>
+                        <td className="py-4 px-4 text-center text-gray-400 font-mono">{idx + 1}</td>
+                        <td className="py-4 px-4 leading-relaxed">
+                          <p className="font-bold text-gray-800">{item.nombre}</p>
+                          <p className="text-[9px] text-gray-400">
+                            {item.tipo === "PROCEDIMIENTO" ? "Procedimiento odontológico principal" : "Servicio complementario"}
+                          </p>
+                        </td>
+                        <td className="py-4 px-4 text-center font-mono">1</td>
+                        <td className="py-4 px-4 text-right font-mono">{item.precio ? item.precio.toFixed(2) : "0.00"}</td>
+                        <td className="py-4 px-4 text-right font-mono font-bold text-gray-800">
+                          {item.precio ? item.precio.toFixed(2) : "0.00"}
+                        </td>
+                      </tr>
+                    ))
+                  )}
                   {/* Fila del tipo de cambio equivalente */}
                   <tr className="bg-gray-50/50">
                     <td></td>
-                    <td className="py-2.5 px-4 text-gray-400 italic">Equivalente en moneda extranjera (T.C. 9.85)</td>
+                    <td className="py-2.5 px-4 text-gray-400 italic">Equivalente en moneda extranjera (T.C. {receipt.tipo_cambio || "9.85"})</td>
                     <td className="text-center text-gray-400 font-mono">-</td>
                     <td className="text-right text-gray-400 font-mono italic">${receipt.monto_usd ? receipt.monto_usd.toFixed(2) : "0.00"}</td>
                     <td className="py-2.5 px-4 text-right font-mono text-gray-400 italic">
@@ -291,10 +358,10 @@ export default function Comprobante({ receipt, onClose }) {
                 <span>TOTAL OFICIAL:</span>
                 <span className="font-mono text-lg">{receipt.monto_bob ? receipt.monto_bob.toFixed(2) : "0.00"} BOB</span>
               </div>
-              {receipt.saldo_restante_bob !== undefined && (
+              {saldoRestante !== undefined && (
                 <div className="flex justify-between items-center pt-2 font-bold text-red-500 text-xs">
                   <span>Saldo Pendiente Restante:</span>
-                  <span className="font-mono text-red-600">{receipt.saldo_restante_bob.toFixed(2)} BOB</span>
+                  <span className="font-mono text-red-600">{saldoRestante.toFixed(2)} BOB</span>
                 </div>
               )}
             </div>
