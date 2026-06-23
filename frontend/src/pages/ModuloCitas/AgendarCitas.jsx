@@ -1,5 +1,5 @@
 import { useState, useEffect, useMemo, useRef } from "react";
-import FormularioPaciente from "../../../pages/RegisterPatient";
+import FormularioPaciente from "../RegisterPatient";
 
 const API_URL = import.meta.env.VITE_API_URL;
 const ROLES = { ODONTOLOGO: 2 };
