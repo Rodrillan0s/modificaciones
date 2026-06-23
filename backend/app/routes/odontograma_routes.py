@@ -12,7 +12,7 @@ odontograma_routes = Blueprint('odontograma_routes', __name__)
 # REGISTRAR ODONTOGRAMA
 # =========================
 @odontograma_routes.route('/api/pacientes/<int:id_paciente>/odontograma', methods=['POST'])
-#@permission_required("crear_odontograma")
+@permission_required("crear_paciente")
 def registrar_odontograma(id_paciente):
 
     try:
@@ -72,17 +72,22 @@ def registrar_odontograma(id_paciente):
 # CONSULTAR ODONTOGRAMA
 # =========================
 @odontograma_routes.route('/api/pacientes/<int:id_paciente>/odontograma', methods=['GET'])
-#@permission_required("visualizar_odontograma")
+@permission_required("visualizar_pacientes")
 def consultar_odontograma(id_paciente):
-
     try:
+ 
+        db.execute_query("CALL clinica.p_odontograma()",commit=True)
+  
+  
+
+      
 
         query = """
             SELECT
                 a.id_odontograma,
                 a.id_paciente,
                 a.id_cita,
-                a.fecha,
+                a.fecha::Date,
                 a.tipo_evento,
                 a.descripcion,
                 a.codigo_diente,
@@ -144,12 +149,11 @@ def consultar_odontograma(id_paciente):
             "message": str(e)
         }), 500
 
-
 # =========================
 # MODIFICAR ODONTOGRAMA
 # =========================
 @odontograma_routes.route('/api/odontograma/<int:id_odontograma>', methods=['PUT'])
-#@permission_required("modificar_odontograma")
+@permission_required("modificar_paciente")
 def modificar_odontograma(id_odontograma):
 
     try:
@@ -197,7 +201,7 @@ def modificar_odontograma(id_odontograma):
 # ELIMINAR ODONTOGRAMA
 # =========================
 @odontograma_routes.route('/api/odontograma/<int:id_odontograma>', methods=['DELETE'])
-#@permission_required("eliminar_odontograma")
+@permission_required("eliminar_paciente")
 def eliminar_odontograma(id_odontograma):
 
     try:

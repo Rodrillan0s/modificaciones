@@ -1026,7 +1026,7 @@ export default function ModuloOdontograma() {
                     <label className="odo-form-label">ID Servicio</label>
                     <input
                       className="odo-form-input"
-                      placeholder="Ej. 001"
+                      placeholder=""
                       value={formulario.id_servicio}
                       onChange={(e) =>
                         setFormulario({ ...formulario, id_servicio: e.target.value })
