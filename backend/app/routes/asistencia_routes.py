@@ -59,18 +59,15 @@ def registrar_asistencia():
         return jsonify({"success": False, "message": "El código QR ha expirado. Por favor, escanee de nuevo."}), 400
         
     try:
-        # Determinar automáticamente si es ENTRADA o SALIDA consultando la última marca de hoy
-        res = db.execute_query(
-            f"SELECT tipo FROM {Config.SCHEMA}.t_asistencia WHERE id_personal = %s AND DATE(fecha_registro) = CURRENT_DATE ORDER BY fecha_registro DESC LIMIT 1",
-            (user["id_persona"],), fetchone=True
-        )
-        tipo = "SALIDA" if res and res[0] == "ENTRADA" else "ENTRADA"
-            
-        # Registrar asistencia en DB
+        # Registrar marca llamando a la función de Postgres (que auto-determina entrada/salida y bloquea concurrentes)
         res_ins = db.execute_query(
-            f"INSERT INTO {Config.SCHEMA}.t_asistencia (id_personal, id_creador_qr, tipo) VALUES (%s, %s, %s) RETURNING id_asistencia, fecha_registro",
-            (user["id_persona"], token_info["id_creador_qr"], tipo), fetchone=True, commit=True
+            f"SELECT r_id_asistencia, r_tipo, r_fecha_registro FROM {Config.SCHEMA}.f_registrar_asistencia(%s, %s)",
+            (user["id_persona"], token_info["id_creador_qr"]), fetchone=True, commit=True
         )
+        if not res_ins:
+            raise Exception("No se pudo registrar la marca de asistencia.")
+            
+        tipo = res_ins[1]
         
         # Registrar en bitácora
         Bitacora.registrar("ADMINISTRACION", f"ASISTENCIA_{tipo}", f"Registro de {tipo} para empleado {user['id_persona']}", id_usuario=user["id_usuario"])
@@ -78,7 +75,7 @@ def registrar_asistencia():
         return jsonify({
             "success": True,
             "message": f"¡Marca registrada con éxito! Has marcado tu {tipo}.",
-            "data": {"id_asistencia": res_ins[0], "tipo": tipo, "fecha_registro": res_ins[1].isoformat()}
+            "data": {"id_asistencia": res_ins[0], "tipo": tipo, "fecha_registro": res_ins[2].isoformat()}
         }), 201
     except Exception as e:
         return jsonify({"success": False, "message": f"Error al registrar marca: {str(e)}"}), 500
