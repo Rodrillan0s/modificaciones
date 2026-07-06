@@ -180,70 +180,31 @@ def reporte_mensual():
 
 def _obtener_pares_mensual(id_personal, mes):
     mes = mes.strip()
-    if len(mes) == 4:
-        # Reporte anual
-        query = f"""
-            SELECT id_asistencia, tipo, fecha_registro
-            FROM {Config.SCHEMA}.t_asistencia
-            WHERE id_personal = %s AND TO_CHAR(fecha_registro, 'YYYY') = %s
-            ORDER BY fecha_registro ASC
-        """
-    else:
-        # Reporte mensual (por defecto)
-        query = f"""
-            SELECT id_asistencia, tipo, fecha_registro
-            FROM {Config.SCHEMA}.t_asistencia
-            WHERE id_personal = %s AND TO_CHAR(fecha_registro, 'YYYY-MM') = %s
-            ORDER BY fecha_registro ASC
-        """
-        
+    fmt = 'YYYY' if len(mes) == 4 else 'YYYY-MM'
+    query = f"SELECT tipo, fecha_registro FROM {Config.SCHEMA}.t_asistencia WHERE id_personal = %s AND TO_CHAR(fecha_registro, '{fmt}') = %s ORDER BY fecha_registro ASC"
     rows = db.execute_query(query, (id_personal, mes), fetchall=True) or []
     
-    # Procesar y emparejar ENTRADAs y SALIDAs
-    pares = []
-    entrada_activa = None
-    
-    for r in rows:
-        id_asist, tipo, fecha = r
+    pares, entrada_activa = [], None
+    for tipo, fecha in rows:
+        f_str = fecha.strftime("%d/%m/%Y %H:%M:%S")
         if tipo == "ENTRADA":
             if entrada_activa:
-                # Cerrar entrada anterior sin salida
-                pares.append({
-                    "entrada": entrada_activa["fecha"].strftime("%d/%m/%Y %H:%M:%S"),
-                    "salida": None,
-                    "duracion": "Falta marcar salida"
-                })
-            entrada_activa = {"id": id_asist, "fecha": fecha}
-        elif tipo == "SALIDA":
+                pares.append({"entrada": entrada_activa.strftime("%d/%m/%Y %H:%M:%S"), "salida": None, "duracion": "Falta marcar salida"})
+            entrada_activa = fecha
+        else:
             if entrada_activa:
-                # Calcular duración
-                diff = fecha - entrada_activa["fecha"]
-                total_seconds = int(diff.total_seconds())
-                horas = total_seconds // 3600
-                minutos = (total_seconds % 3600) // 60
-                duracion = f"{horas}h {minutos}m"
-                
+                diff = int((fecha - entrada_activa).total_seconds())
                 pares.append({
-                    "entrada": entrada_activa["fecha"].strftime("%d/%m/%Y %H:%M:%S"),
-                    "salida": fecha.strftime("%d/%m/%Y %H:%M:%S"),
-                    "duracion": duracion
+                    "entrada": entrada_activa.strftime("%d/%m/%Y %H:%M:%S"), 
+                    "salida": f_str, 
+                    "duracion": f"{diff // 3600}h {(diff % 3600) // 60}m"
                 })
                 entrada_activa = None
             else:
-                # Salida sin entrada previa registrada
-                pares.append({
-                    "entrada": None,
-                    "salida": fecha.strftime("%d/%m/%Y %H:%M:%S"),
-                    "duracion": "Falta marcar entrada"
-                })
+                pares.append({"entrada": None, "salida": f_str, "duracion": "Falta marcar entrada"})
                 
-    # Si quedó una entrada activa al final
     if entrada_activa:
-        pares.append({
-            "entrada": entrada_activa["fecha"].strftime("%d/%m/%Y %H:%M:%S"),
-            "salida": None,
-            "duracion": "Pendiente (En curso / Falta salida)"
-        })
+        pares.append({"entrada": entrada_activa.strftime("%d/%m/%Y %H:%M:%S"), "salida": None, "duracion": "Pendiente (En curso / Falta salida)"})
         
     return pares
 
