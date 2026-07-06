@@ -1,6 +1,12 @@
+import io
+import csv
 import secrets
 from datetime import datetime, timedelta
-from flask import Blueprint, request, jsonify
+from flask import Blueprint, request, jsonify, Response
+from reportlab.lib.pagesizes import letter
+from reportlab.platypus import SimpleDocTemplate, Paragraph, Spacer, Table, TableStyle
+from reportlab.lib.styles import getSampleStyleSheet, ParagraphStyle
+from reportlab.lib import colors
 from ..config import db, Config
 from ..classes.security import Security, admin_required
 from ..services.bitacora import Bitacora
@@ -222,12 +228,6 @@ def _obtener_info_empleado(id_personal):
     return nombre, cargo
 
 def _generar_asistencia_pdf(nombre_empleado, cargo, mes, pares):
-    import io
-    from reportlab.lib.pagesizes import letter
-    from reportlab.platypus import SimpleDocTemplate, Paragraph, Spacer, Table, TableStyle
-    from reportlab.lib.styles import getSampleStyleSheet, ParagraphStyle
-    from reportlab.lib import colors
-
     buffer = io.BytesIO()
     doc = SimpleDocTemplate(buffer, pagesize=letter, rightMargin=40, leftMargin=40, topMargin=40, bottomMargin=40)
     story = []
@@ -328,9 +328,6 @@ def _generar_asistencia_pdf(nombre_empleado, cargo, mes, pares):
     return pdf_bytes
 
 def _generar_asistencia_csv(nombre_empleado, cargo, mes, pares):
-    import io
-    import csv
-    
     total_minutes = 0
     completed_shifts = 0
     for item in pares:
@@ -377,7 +374,6 @@ def _generar_asistencia_csv(nombre_empleado, cargo, mes, pares):
 
 @asistencia_routes.route('/api/asistencia/exportar/pdf', methods=['GET'])
 def exportar_pdf():
-    from flask import Response
     user = Security.decode_token()
     if not user:
         return jsonify({"success": False, "message": "No autenticado"}), 401
@@ -408,7 +404,6 @@ def exportar_pdf():
 
 @asistencia_routes.route('/api/asistencia/exportar/excel', methods=['GET'])
 def exportar_excel():
-    from flask import Response
     user = Security.decode_token()
     if not user:
         return jsonify({"success": False, "message": "No autenticado"}), 401
