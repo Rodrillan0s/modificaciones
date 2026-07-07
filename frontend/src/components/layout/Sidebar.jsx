@@ -56,6 +56,7 @@ export default function Sidebar({
     pagos: true,
     cuenta: true, 
     reportes: false,
+
   });
 
   const toggleMenu = (menu) => {
@@ -280,6 +281,7 @@ export default function Sidebar({
                 <div className="mt-2 space-y-2">
                   <MenuButton title="Usuarios y Roles" />
                   <MenuButton title="Gestión de Personal" />
+                  <MenuButton title="Disponibilidad" />
                   <MenuButton title="Bitácora" />
                 </div>
               )}

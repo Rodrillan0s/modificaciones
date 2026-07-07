@@ -312,3 +312,296 @@ def listar_contratos():
             "success": False,
             "message": str(e)
         }), 500
+
+
+
+
+# =========================================================
+# LISTAR DISPONIBILIDAD DEL PERSONAL
+# =========================================================
+
+@personal_routes.route('/api/disponibilidad', methods=['GET'])
+@admin_required
+@permission_required("visualizar_personal")
+def listar_disponibilidad():
+
+    try:
+
+        rows = db.execute_query("""
+            SELECT
+                d.id_disponibilidad,
+                d.id_personal,
+                pe.nombre,
+                d.fecha_inicio::date,
+                d.fecha_fin::Date,
+                d.fecha_registro,
+                d.motivo,
+                d.observacion
+            FROM clinica.t_disponibilidad_personal d
+            INNER JOIN clinica.t_personal p
+                ON p.id_personal = d.id_personal
+            INNER JOIN clinica.t_persona pe
+                ON pe.id_persona = p.id_personal
+            ORDER BY d.fecha_inicio DESC
+        """, fetchall=True)
+
+        data = [{
+            "id_disponibilidad": r[0],
+            "id_personal": r[1],
+            "nombre": r[2],
+            "fecha_inicio": r[3],
+            "fecha_fin": r[4],
+            "fecha_registro": r[5],
+            "motivo": r[6],
+            "observacion": r[7]
+        } for r in (rows or [])]
+
+        return jsonify({
+            "success": True,
+            "data": data
+        }), 200
+
+    except Exception as e:
+
+        return jsonify({
+            "success": False,
+            "message": str(e)
+        }), 500
+
+
+# =========================================================
+# REGISTRAR DISPONIBILIDAD
+# =========================================================
+
+@personal_routes.route('/api/disponibilidad', methods=['POST'])
+@admin_required
+@permission_required("modificar_personal")
+def registrar_disponibilidad():
+
+    try:
+
+        data = request.get_json() or {}
+
+        id_personal = data.get("id_personal")
+        fecha_inicio = data.get("fecha_inicio")
+        fecha_fin = data.get("fecha_fin")
+        motivo = data.get("motivo")
+        observacion = data.get("observacion")
+
+        if not all([id_personal, fecha_inicio, fecha_fin, motivo]):
+
+            return jsonify({
+                "success": False,
+                "message": "Datos incompletos."
+            }), 400
+
+        if fecha_inicio > fecha_fin:
+
+            return jsonify({
+                "success": False,
+                "message": "La fecha inicio no puede ser mayor a la fecha fin."
+            }), 400
+
+        existe = db.execute_query("""
+            SELECT 1
+            FROM clinica.t_disponibilidad_personal
+            WHERE id_personal = %s
+            AND (
+                    %s BETWEEN fecha_inicio AND fecha_fin
+                OR  %s BETWEEN fecha_inicio AND fecha_fin
+                OR  fecha_inicio BETWEEN %s AND %s
+                OR  fecha_fin BETWEEN %s AND %s
+            )
+            LIMIT 1
+        """,
+        (
+            id_personal,
+            fecha_inicio,
+            fecha_fin,
+            fecha_inicio,
+            fecha_fin,
+            fecha_inicio,
+            fecha_fin
+        ),
+        fetchone=True)
+
+        if existe:
+
+            return jsonify({
+                "success": False,
+                "message": "Ya existe un periodo registrado para ese personal."
+            }), 400
+
+        db.execute_query("""
+            INSERT INTO clinica.t_disponibilidad_personal
+            (
+                id_personal,
+                fecha_inicio,
+                fecha_fin,
+                motivo,
+                observacion
+            )
+            VALUES
+            (
+                %s,%s,%s,%s,%s
+            )
+        """,
+        (
+            id_personal,
+            fecha_inicio,
+            fecha_fin,
+            motivo,
+            observacion
+        ),
+        commit=True)
+
+        Bitacora.registrar(
+            "PERSONAL",
+            "CREATE",
+            f"Disponibilidad registrada para personal {id_personal}"
+        )
+
+        return jsonify({
+            "success": True,
+            "message": "Disponibilidad registrada correctamente."
+        }), 201
+
+    except Exception as e:
+
+        return jsonify({
+            "success": False,
+            "message": str(e)
+        }), 500
+    
+
+# =========================================================
+# ACTUALIZAR DISPONIBILIDAD
+# =========================================================
+
+@personal_routes.route('/api/disponibilidad/<int:id_disponibilidad>', methods=['PUT'])
+@admin_required
+@permission_required("modificar_personal")
+def actualizar_disponibilidad(id_disponibilidad):
+
+    try:
+
+        data = request.get_json() or {}
+
+        id_personal = data.get("id_personal")
+        fecha_inicio = data.get("fecha_inicio")
+        fecha_fin = data.get("fecha_fin")
+        motivo = data.get("motivo")
+        observacion = data.get("observacion")
+
+        if fecha_inicio > fecha_fin:
+
+            return jsonify({
+                "success": False,
+                "message": "La fecha inicio no puede ser mayor a la fecha fin."
+            }), 400
+
+        existe = db.execute_query("""
+            SELECT 1
+            FROM clinica.t_disponibilidad_personal
+            WHERE id_personal = %s
+            AND id_disponibilidad <> %s
+            AND (
+                    %s BETWEEN fecha_inicio AND fecha_fin
+                OR  %s BETWEEN fecha_inicio AND fecha_fin
+                OR  fecha_inicio BETWEEN %s AND %s
+                OR  fecha_fin BETWEEN %s AND %s
+            )
+            LIMIT 1
+        """,
+        (
+            id_personal,
+            id_disponibilidad,
+            fecha_inicio,
+            fecha_fin,
+            fecha_inicio,
+            fecha_fin,
+            fecha_inicio,
+            fecha_fin
+        ),
+        fetchone=True)
+
+        if existe:
+
+            return jsonify({
+                "success": False,
+                "message": "Ya existe otro periodo registrado."
+            }), 400
+
+        db.execute_query("""
+            UPDATE clinica.t_disponibilidad_personal
+            SET
+                id_personal = %s,
+                fecha_inicio = %s,
+                fecha_fin = %s,
+                motivo = %s,
+                observacion = %s
+            WHERE id_disponibilidad = %s
+        """,
+        (
+            id_personal,
+            fecha_inicio,
+            fecha_fin,
+            motivo,
+            observacion,
+            id_disponibilidad
+        ),
+        commit=True)
+
+        Bitacora.registrar(
+            "PERSONAL",
+            "UPDATE",
+            f"Disponibilidad actualizada {id_disponibilidad}"
+        )
+
+        return jsonify({
+            "success": True,
+            "message": "Disponibilidad actualizada."
+        }), 200
+
+    except Exception as e:
+
+        return jsonify({
+            "success": False,
+            "message": str(e)
+        }), 500
+# =========================================================
+# ELIMINAR DISPONIBILIDAD
+# =========================================================
+
+@personal_routes.route('/api/disponibilidad/<int:id_disponibilidad>', methods=['DELETE'])
+@admin_required
+@permission_required("modificar_personal")
+def eliminar_disponibilidad(id_disponibilidad):
+
+    try:
+
+        db.execute_query("""
+            DELETE
+            FROM clinica.t_disponibilidad_personal
+            WHERE id_disponibilidad = %s
+        """,
+        (id_disponibilidad,),
+        commit=True)
+
+        Bitacora.registrar(
+            "PERSONAL",
+            "DELETE",
+            f"Disponibilidad eliminada {id_disponibilidad}"
+        )
+
+        return jsonify({
+            "success": True,
+            "message": "Disponibilidad eliminada correctamente."
+        }), 200
+
+    except Exception as e:
+
+        return jsonify({
+            "success": False,
+            "message": str(e)
+        }), 500        

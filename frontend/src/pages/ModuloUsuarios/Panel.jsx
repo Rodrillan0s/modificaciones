@@ -10,6 +10,9 @@ import DashboardOdontologo from "../../components/dashboards/DashboardOdontologo
 import DashboardRecepcionista from "../../components/dashboards/DashboardRecepcionista";
 import DashboardPaciente from "../../components/dashboards/DashboardPaciente";
 
+
+
+import ModuloDisponibilidad from "../ModuloAdministrativo/ModuloDisponibilidad";
 import CambioPasswordUI from "./CambioPassword";
 import AgendarCitas from "../ModuloCitas/AgendarCitas";
 import AgendaCitas from "../ModuloCitas/AgendaCitas";
@@ -440,7 +443,13 @@ export default function Panel() {
               onRefresh={() => fetchTodo()}
             />
           )}
-
+          {/* DISPONIBILIDAD */}
+          {activeMenu === "Disponibilidad" && userRolId < 5 && (
+            <ModuloDisponibilidad
+              dataMaster={dataMaster}
+              onRefresh={() => fetchTodo()}
+            />
+          )}    
           {/* SERVICIOS */}
           {activeMenu === "Servicios" && userRolId < 5 && <ModuloServicios />}
 
@@ -475,6 +484,7 @@ export default function Panel() {
             "Reporte Finanzas",
             "Odontograma",
             "Programar Correos",
+            "Disponibilidad", 
           ].includes(activeMenu) && (
             <div className="h-full flex flex-col items-center justify-center opacity-20 text-center">
               <p className="text-4xl md:text-6xl mb-4">...</p>
