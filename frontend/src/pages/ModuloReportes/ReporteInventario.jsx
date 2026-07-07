@@ -1,6 +1,7 @@
-import React, { useState, useEffect } from "react";
+import React, { useState, useEffect, useRef } from "react";
 import { exportToExcel, exportToWord } from "../../services/exporter";
 import AsistenteVoz from "../../components/UIs/reportes/AsistenteVoz";
+import ModalEnviarCorreo from "../../components/UIs/reportes/ModalEnviarCorreo";
 
 export default function ReporteInventario({ dataMaster, user, setActiveMenu }) {
   const API_URL = import.meta.env.VITE_API_URL;
@@ -13,6 +14,8 @@ export default function ReporteInventario({ dataMaster, user, setActiveMenu }) {
   const [fechaFin, setFechaFin] = useState("");
   const [filtroMaterialId, setFiltroMaterialId] = useState("");
   const [filtroProveedorId, setFiltroProveedorId] = useState("");
+  const [isMailModalOpen, setIsMailModalOpen] = useState(false);
+  const [prefilledEmails, setPrefilledEmails] = useState([]);
   const [filtroTopN, setFiltroTopN] = useState("");
   const [filtroStockMin, setFiltroStockMin] = useState("");
   const [filtroStockMax, setFiltroStockMax] = useState("");
@@ -28,6 +31,7 @@ export default function ReporteInventario({ dataMaster, user, setActiveMenu }) {
   const [reportData, setReportData] = useState([]);
   const [loading, setLoading] = useState(false);
   const [errorMessage, setErrorMessage] = useState("");
+  const skipNextFetchRef = useRef(false);
 
   const getFetchConfig = () => ({
     headers: {
@@ -52,23 +56,32 @@ export default function ReporteInventario({ dataMaster, user, setActiveMenu }) {
     }
   };
 
-  const cargarDatosDelReporte = async () => {
+  const cargarDatosDelReporte = async (overrideInicio, overrideFin, overrideType, overrideTop, overrideProveedor, overrideMaterial) => {
     setLoading(true);
     setErrorMessage("");
     try {
       const params = new URLSearchParams();
-      params.append("tipo", reportType);
+      const rType = (overrideType && typeof overrideType === 'string') ? overrideType : reportType;
+      params.append("tipo", rType);
       params.append("expirable", filtroExpirable);
       params.append("estado", filtroEstadoStock);
-      if (fechaInicio) params.append("fecha_inicio", fechaInicio);
-      if (fechaFin) params.append("fecha_fin", fechaFin);
-      if (filtroMaterialId) params.append("id_material", filtroMaterialId);
-      if (filtroProveedorId) params.append("id_proveedor", filtroProveedorId);
-      if (filtroTopN) params.append("top", filtroTopN);
+      const fInicio = (overrideInicio && typeof overrideInicio === 'string') ? overrideInicio : fechaInicio;
+      const fFin = (overrideFin && typeof overrideFin === 'string') ? overrideFin : fechaFin;
+      if (fInicio) params.append("fecha_inicio", fInicio);
+      if (fFin) params.append("fecha_fin", fFin);
+      
+      const rProv = overrideProveedor !== undefined ? overrideProveedor : filtroProveedorId;
+      const rMat = overrideMaterial !== undefined ? overrideMaterial : filtroMaterialId;
+      if (rMat) params.append("id_material", rMat);
+      if (rProv) params.append("id_proveedor", rProv);
+      
+      const rTop = (overrideTop !== undefined && typeof overrideTop !== 'object') ? overrideTop : filtroTopN;
+      if (rTop) params.append("top", rTop);
+      
       if (filtroStockMin) params.append("stock_min", filtroStockMin);
       if (filtroStockMax) params.append("stock_max", filtroStockMax);
       if (filtroSoloStock) params.append("solo_stock", "true");
-      if (reportType === "estatico" && fechaCorte) {
+      if (rType === "estatico" && fechaCorte) {
         params.append("fecha", fechaCorte);
       }
 
@@ -94,8 +107,48 @@ export default function ReporteInventario({ dataMaster, user, setActiveMenu }) {
 
   useEffect(() => {
     cargarCatalogosSelectores();
+    if (skipNextFetchRef.current) {
+      skipNextFetchRef.current = false;
+      return;
+    }
     cargarDatosDelReporte();
   }, [reportType]);
+
+  useEffect(() => {
+    const handleVoiceGenerate = (e) => {
+      if (e.detail.modulo === "inventario") {
+        if (e.detail.subtab && e.detail.subtab !== reportType) {
+          skipNextFetchRef.current = true;
+          setReportType(e.detail.subtab);
+        }
+        if (e.detail.top !== undefined) {
+          setFiltroTopN(e.detail.top);
+        }
+        if (e.detail.id_proveedor !== undefined) {
+          setFiltroProveedorId(e.detail.id_proveedor);
+        }
+        if (e.detail.id_material !== undefined) {
+          setFiltroMaterialId(e.detail.id_material);
+        }
+        if (e.detail.fecha_desde !== undefined) setFechaInicio(e.detail.fecha_desde);
+        if (e.detail.fecha_hasta !== undefined) setFechaFin(e.detail.fecha_hasta);
+        cargarDatosDelReporte(e.detail.fecha_desde, e.detail.fecha_hasta, e.detail.subtab, e.detail.top, e.detail.id_proveedor, e.detail.id_material);
+      }
+    };
+    window.addEventListener("generar-reporte-voz", handleVoiceGenerate);
+    return () => window.removeEventListener("generar-reporte-voz", handleVoiceGenerate);
+  }, [reportType, filtroExpirable, filtroEstadoStock, fechaInicio, fechaFin, filtroMaterialId, filtroProveedorId, filtroTopN, filtroStockMin, filtroStockMax, filtroSoloStock, fechaCorte]);
+
+  useEffect(() => {
+    const handleVoiceConfig = (e) => {
+      if (e.detail.modulo === "inventario") {
+        setPrefilledEmails(e.detail.destinatarios || []);
+        setIsMailModalOpen(true);
+      }
+    };
+    window.addEventListener("configurar-envio-voz", handleVoiceConfig);
+    return () => window.removeEventListener("configurar-envio-voz", handleVoiceConfig);
+  }, []);
 
   const handleExcel = () => {
     exportToExcel("table-inventario-rep", `Reporte_Inventario_${reportType.toUpperCase()}`, `Reporte de Inventario - ${reportType}`);
@@ -238,7 +291,7 @@ export default function ReporteInventario({ dataMaster, user, setActiveMenu }) {
         <div className="flex items-center gap-3">
           <AsistenteVoz setActiveMenu={setActiveMenu} userRolId={user?.rol} />
           <button
-            onClick={cargarDatosDelReporte}
+            onClick={() => cargarDatosDelReporte()}
             disabled={loading}
             className="flex items-center gap-2 px-5 py-3 bg-[#148F77] text-white text-sm font-bold rounded-xl transition-all shadow-sm hover:bg-[#0f6b59] hover:-translate-y-0.5 disabled:opacity-50"
           >
@@ -410,6 +463,12 @@ export default function ReporteInventario({ dataMaster, user, setActiveMenu }) {
                   Exportar Word
                 </button>
                 <button
+                  onClick={() => setIsMailModalOpen(true)}
+                  className="bg-orange-500 hover:bg-orange-600 text-white font-black text-[10px] uppercase tracking-widest px-5 py-3.5 rounded-xl transition-all shadow-md"
+                >
+                  Enviar por Correo
+                </button>
+                <button
                   onClick={() => window.print()}
                   className="bg-blue-600 hover:bg-blue-700 text-white font-black text-[10px] uppercase tracking-widest px-5 py-3.5 rounded-xl transition-all shadow-md"
                 >
@@ -480,6 +539,18 @@ export default function ReporteInventario({ dataMaster, user, setActiveMenu }) {
           </div>
         </div>
       </div>
+      <ModalEnviarCorreo
+        isOpen={isMailModalOpen}
+        onClose={() => setIsMailModalOpen(false)}
+        modulo="inventario"
+        subtab={reportType}
+        fechaInicio={fechaInicio}
+        fechaFin={fechaFin}
+        top={filtroTopN}
+        idProveedor={filtroProveedorId}
+        idMaterial={filtroMaterialId}
+        prefilledEmails={prefilledEmails}
+      />
     </div>
   );
 }

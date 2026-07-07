@@ -1,11 +1,14 @@
 import React, { useState, useEffect } from "react";
 import { exportToExcel, exportToWord } from "../../services/exporter";
 import AsistenteVoz from "../../components/UIs/reportes/AsistenteVoz";
+import ModalEnviarCorreo from "../../components/UIs/reportes/ModalEnviarCorreo";
 
 export default function ReporteAdministracion({ dataMaster, user, setActiveMenu }) {
   const [activeSubTab, setActiveSubTab] = useState("resumen");
   const [fechaInicio, setFechaInicio] = useState("");
   const [fechaFin, setFechaFin] = useState("");
+  const [isMailModalOpen, setIsMailModalOpen] = useState(false);
+  const [prefilledEmails, setPrefilledEmails] = useState([]);
   const [salasData, setSalasData] = useState([]);
   const [serviciosData, setServiciosData] = useState([]);
   const [procedimientosData, setProcedimientosData] = useState([]);
@@ -22,13 +25,15 @@ export default function ReporteAdministracion({ dataMaster, user, setActiveMenu 
 
   const API_URL = import.meta.env.VITE_API_URL;
 
-  const fetchReporte = async () => {
+  const fetchReporte = async (overrideInicio, overrideFin) => {
     setLoading(true);
     setErrorMessage("");
     try {
       const params = new URLSearchParams();
-      if (fechaInicio) params.append("fecha_desde", fechaInicio);
-      if (fechaFin) params.append("fecha_hasta", fechaFin);
+      const fInicio = (overrideInicio && typeof overrideInicio === 'string') ? overrideInicio : fechaInicio;
+      const fFin = (overrideFin && typeof overrideFin === 'string') ? overrideFin : fechaFin;
+      if (fInicio) params.append("fecha_desde", fInicio);
+      if (fFin) params.append("fecha_hasta", fFin);
 
       const res = await fetch(`${API_URL}/reportes/administracion?${params.toString()}`, {
         headers: {
@@ -57,6 +62,32 @@ export default function ReporteAdministracion({ dataMaster, user, setActiveMenu 
 
   useEffect(() => {
     fetchReporte();
+  }, []);
+
+  useEffect(() => {
+    const handleVoiceGenerate = (e) => {
+      if (e.detail.modulo === "administracion") {
+        if (e.detail.subtab) {
+          setActiveSubTab(e.detail.subtab);
+        }
+        if (e.detail.fecha_desde !== undefined) setFechaInicio(e.detail.fecha_desde);
+        if (e.detail.fecha_hasta !== undefined) setFechaFin(e.detail.fecha_hasta);
+        fetchReporte(e.detail.fecha_desde, e.detail.fecha_hasta);
+      }
+    };
+    window.addEventListener("generar-reporte-voz", handleVoiceGenerate);
+    return () => window.removeEventListener("generar-reporte-voz", handleVoiceGenerate);
+  }, [fechaInicio, fechaFin]);
+
+  useEffect(() => {
+    const handleVoiceConfig = (e) => {
+      if (e.detail.modulo === "administracion") {
+        setPrefilledEmails(e.detail.destinatarios || []);
+        setIsMailModalOpen(true);
+      }
+    };
+    window.addEventListener("configurar-envio-voz", handleVoiceConfig);
+    return () => window.removeEventListener("configurar-envio-voz", handleVoiceConfig);
   }, []);
 
   const handleExcel = () => {
@@ -117,7 +148,7 @@ export default function ReporteAdministracion({ dataMaster, user, setActiveMenu 
         <div className="flex items-center gap-3">
           <AsistenteVoz setActiveMenu={setActiveMenu} userRolId={user?.rol} />
           <button
-            onClick={fetchReporte}
+            onClick={() => fetchReporte()}
             disabled={loading}
             className="flex items-center gap-2 px-5 py-3 bg-[#148F77] text-white text-sm font-bold rounded-xl transition-all shadow-sm hover:bg-[#0f6b59] hover:-translate-y-0.5 disabled:opacity-50"
           >
@@ -211,6 +242,12 @@ export default function ReporteAdministracion({ dataMaster, user, setActiveMenu 
                   className="bg-blue-800 hover:bg-blue-900 text-white font-black text-[10px] uppercase tracking-widest px-5 py-3.5 rounded-xl transition-all shadow-md"
                 >
                   Exportar Word
+                </button>
+                <button
+                  onClick={() => setIsMailModalOpen(true)}
+                  className="bg-orange-500 hover:bg-orange-600 text-white font-black text-[10px] uppercase tracking-widest px-5 py-3.5 rounded-xl transition-all shadow-md"
+                >
+                  Enviar por Correo
                 </button>
                 <button
                   onClick={() => window.print()}
@@ -483,6 +520,15 @@ export default function ReporteAdministracion({ dataMaster, user, setActiveMenu 
           </div>
         </div>
       </div>
+      <ModalEnviarCorreo
+        isOpen={isMailModalOpen}
+        onClose={() => setIsMailModalOpen(false)}
+        modulo="administracion"
+        subtab={activeSubTab}
+        fechaInicio={fechaInicio}
+        fechaFin={fechaFin}
+        prefilledEmails={prefilledEmails}
+      />
     </div>
   );
 }

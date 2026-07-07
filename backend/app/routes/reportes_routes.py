@@ -501,3 +501,156 @@ def get_reporte_administracion():
         import traceback
         traceback.print_exc()
         return jsonify({"success": False, "message": str(e)}), 500
+
+# =========================================================
+# PROGRAMACIÓN DE CORREOS AUTOMÁTICOS / MANUALES (CU34 - CU37)
+# =========================================================
+
+def listar_usuario_disponible():
+    """
+    Obtiene los usuarios activos habilitados para recibir correos (Admin y Odontólogos).
+    """
+    query = f"""
+        SELECT u.id_usuario, u.correo, p.nombre, r.tipo_rol
+        FROM {Config.SCHEMA}.t_usuario u
+        INNER JOIN {Config.SCHEMA}.t_rol r ON u.id_rol = r.id_rol
+        LEFT JOIN {Config.SCHEMA}.t_persona p ON u.id_persona = p.id_persona
+        WHERE u.estado = true AND u.id_rol IN (1, 2)
+        ORDER BY p.nombre ASC
+    """
+    rows = db.execute_query(query, fetchall=True) or []
+    return [{
+        "id_usuario": r[0],
+        "correo": r[1],
+        "nombre": r[2] or r[1],
+        "rol": r[3]
+    } for r in rows]
+
+def programar_Correos_Automáticos(tarea, entidad, categoria, para, habilitado):
+    """
+    Guarda o actualiza la configuración de la tarea programada en la base de datos.
+    """
+    try:
+        check_query = f"SELECT count(*) FROM {Config.SCHEMA}.t_entidades_mail WHERE tarea = %s"
+        count = db.execute_query(check_query, (tarea,), fetchone=True)[0]
+        
+        if count > 0:
+            query = f"""
+                UPDATE {Config.SCHEMA}.t_entidades_mail
+                SET entidad = %s, categoria = %s, para = %s, habilitado = %s
+                WHERE tarea = %s
+            """
+            params = (entidad, categoria, para, habilitado, tarea)
+        else:
+            query = f"""
+                INSERT INTO {Config.SCHEMA}.t_entidades_mail (tarea, entidad, categoria, para, habilitado)
+                VALUES (%s, %s, %s, %s, %s)
+            """
+            params = (tarea, entidad, categoria, para, habilitado)
+            
+        db.execute_query(query, params, commit=True)
+        return True
+    except Exception as e:
+        print(f"[ERROR] programar_Correos_Automáticos: {e}")
+        return False
+
+@reportes_routes.route('/api/reportes/disponibles/usuarios', methods=['GET'])
+@admin_required
+def get_usuarios_disponibles():
+    try:
+        usuarios = listar_usuario_disponible()
+        return jsonify({"success": True, "data": usuarios}), 200
+    except Exception as e:
+        return jsonify({"success": False, "message": str(e)}), 500
+
+@reportes_routes.route('/api/reportes/programacion-correos', methods=['GET'])
+@admin_required
+def get_programacion_correos():
+    try:
+        query = f"""
+            SELECT tarea, entidad, categoria, para, habilitado
+            FROM {Config.SCHEMA}.t_entidades_mail
+            ORDER BY tarea ASC
+        """
+        rows = db.execute_query(query, fetchall=True) or []
+        data = [{
+            "tarea": r[0],
+            "entidad": r[1],
+            "categoria": r[2],
+            "para": r[3],
+            "habilitado": r[4]
+        } for r in rows]
+        return jsonify({"success": True, "data": data}), 200
+    except Exception as e:
+        return jsonify({"success": False, "message": str(e)}), 500
+
+@reportes_routes.route('/api/reportes/programacion-correos', methods=['POST'])
+@admin_required
+def post_programacion_correos():
+    try:
+        req = request.get_json() or {}
+        tarea = req.get('tarea')
+        entidad = req.get('entidad')
+        categoria = req.get('categoria')
+        para = req.get('para')
+        habilitado = req.get('habilitado', True)
+        
+        if not all([tarea, entidad, categoria, para]):
+            Bitacora.registrar("REPORTES", "PROGRAMACION_CORREO_FALLIDA", f"Datos incompletos para programar tarea '{tarea}'")
+            return jsonify({"success": False, "message": "Datos incompletos"}), 400
+            
+        exito = programar_Correos_Automáticos(tarea, entidad, categoria, para, habilitado)
+        if exito:
+            Bitacora.registrar("REPORTES", "PROGRAMACION_CORREO", f"Tarea '{tarea}' programada exitosamente para {para}")
+            return jsonify({"success": True, "message": "Programación guardada exitosamente"}), 200
+        else:
+            Bitacora.registrar("REPORTES", "PROGRAMACION_CORREO_FALLIDA", f"Error de base de datos al programar tarea '{tarea}'")
+            return jsonify({"success": False, "message": "Error al guardar la programación"}), 500
+    except Exception as e:
+        Bitacora.registrar("REPORTES", "PROGRAMACION_CORREO_FALLIDA", f"Excepción al programar: {str(e)}")
+        return jsonify({"success": False, "message": str(e)}), 500
+
+@reportes_routes.route('/api/reportes/programacion-correos/ejecutar-manual', methods=['POST'])
+@admin_required
+def post_ejecutar_manual():
+    try:
+        req = request.get_json() or {}
+        entidad = req.get('entidad')
+        para = req.get('para')
+        
+        if not entidad or not para:
+            return jsonify({"success": False, "message": "Parámetros incompletos"}), 400
+            
+        para_emails = [e.strip() for e in para.split(',') if e.strip()]
+        if not para_emails:
+            return jsonify({"success": False, "message": "Destinatarios inválidos"}), 400
+            
+        tipo = req.get('tipo', 'general')
+        fecha_inicio = req.get('fecha_inicio', '')
+        fecha_fin = req.get('fecha_fin', '')
+        id_proveedor = req.get('id_proveedor', '')
+        id_material = req.get('id_material', '')
+        top = req.get('top')
+        
+        from ..utils.scheduler import recordatorio_Citas, reporte_financiero, reporte_inventario, reporte_pacientes, reporte_administracion
+        
+        exito = False
+        if entidad == 'citas':
+            exito = recordatorio_Citas(para_emails, is_manual=True, f_inicio=fecha_inicio, f_fin=fecha_fin, tipo=tipo)
+        elif entidad == 'finanzas':
+            exito = reporte_financiero(para_emails, is_manual=True, f_inicio=fecha_inicio, f_fin=fecha_fin, tipo=tipo)
+        elif entidad == 'inventario':
+            exito = reporte_inventario(para_emails, is_manual=True, tipo=tipo, f_inicio=fecha_inicio, f_fin=fecha_fin, id_proveedor=id_proveedor, id_material=id_material, top=top)
+        elif entidad == 'pacientes':
+            exito = reporte_pacientes(para_emails, is_manual=True, f_inicio=fecha_inicio, f_fin=fecha_fin, nombre=id_material, tipo=tipo)
+        elif entidad == 'administracion':
+            exito = reporte_administracion(para_emails, is_manual=True, f_inicio=fecha_inicio, f_fin=fecha_fin, tipo=tipo)
+        else:
+            return jsonify({"success": False, "message": "Módulo inválido"}), 400
+            
+        if exito:
+            return jsonify({"success": True, "message": "Reporte enviado exitosamente de forma manual"}), 200
+        else:
+            return jsonify({"success": False, "message": "Error al enviar el reporte. Revise la bitácora."}), 500
+    except Exception as e:
+        return jsonify({"success": False, "message": str(e)}), 500

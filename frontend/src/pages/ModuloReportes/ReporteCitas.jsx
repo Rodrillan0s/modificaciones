@@ -1,18 +1,22 @@
-import React, { useState } from "react";
+import React, { useState, useEffect } from "react";
 import { useAuthStore } from "../../store/auth_store";
+import AsistenteVoz from "../../components/UIs/reportes/AsistenteVoz";
+import ModalEnviarCorreo from "../../components/UIs/reportes/ModalEnviarCorreo";
 import {
   ESTADO_CITA,
   ESTADO_CITA_LABELS,
   ESTADO_CITA_COLORS,
 } from "../../constants/enums";
 
-export default function ReporteCitas({ dataMaster, user }) {
+export default function ReporteCitas({ dataMaster, user, setActiveMenu }) {
   // Estados para filtros
   const [selectedOdontologo, setSelectedOdontologo] = useState("");
 
   const [pacienteSearch, setPacienteSearch] = useState(
     user?.rol >= 5 ? user?.nombre || user?.nombre_usuario || "Mi Perfil" : "",
   );
+  const [isMailModalOpen, setIsMailModalOpen] = useState(false);
+  const [prefilledEmails, setPrefilledEmails] = useState([]);
   const [showPacienteDropdown, setShowPacienteDropdown] = useState(false);
   const [selectedPacienteId, setSelectedPacienteId] = useState(
     user?.rol >= 5 ? user?.id_persona || "" : "",
@@ -35,14 +39,51 @@ export default function ReporteCitas({ dataMaster, user }) {
     p.nombre?.toLowerCase().includes(pacienteSearch.toLowerCase()),
   );
 
-  const generarReporteGlobal = async () => {
+  useEffect(() => {
+    const handleVoiceGenerate = (e) => {
+      if (e.detail.modulo === "citas") {
+        if (e.detail.fecha_desde !== undefined) setFechaInicio(e.detail.fecha_desde);
+        if (e.detail.fecha_hasta !== undefined) setFechaFin(e.detail.fecha_hasta);
+        
+        const targetType = e.detail.subtab || reportType;
+        if (e.detail.subtab) {
+          setReportType(e.detail.subtab);
+        }
+        
+        if (targetType === "global") {
+          generarReporteGlobal(e.detail.fecha_desde, e.detail.fecha_hasta);
+        } else if (targetType === "global_odontologos") {
+          generarReporteGlobalOdontologos(e.detail.fecha_desde, e.detail.fecha_hasta);
+        } else {
+          generarReporte(e.detail.fecha_desde, e.detail.fecha_hasta, targetType);
+        }
+      }
+    };
+    window.addEventListener("generar-reporte-voz", handleVoiceGenerate);
+    return () => window.removeEventListener("generar-reporte-voz", handleVoiceGenerate);
+  }, [fechaInicio, fechaFin, reportType, selectedPacienteId, selectedOdontologo]);
+
+  useEffect(() => {
+    const handleVoiceConfig = (e) => {
+      if (e.detail.modulo === "citas") {
+        setPrefilledEmails(e.detail.destinatarios || []);
+        setIsMailModalOpen(true);
+      }
+    };
+    window.addEventListener("configurar-envio-voz", handleVoiceConfig);
+    return () => window.removeEventListener("configurar-envio-voz", handleVoiceConfig);
+  }, []);
+
+  const generarReporteGlobal = async (overrideInicio, overrideFin) => {
     setReportType("global");
     setLoading(true);
     setErrorMessage("");
     try {
       const params = new URLSearchParams();
-      if (fechaInicio) params.append("fecha_desde", fechaInicio);
-      if (fechaFin) params.append("fecha_hasta", fechaFin);
+      const fInicio = (overrideInicio && typeof overrideInicio === 'string') ? overrideInicio : fechaInicio;
+      const fFin = (overrideFin && typeof overrideFin === 'string') ? overrideFin : fechaFin;
+      if (fInicio) params.append("fecha_desde", fInicio);
+      if (fFin) params.append("fecha_hasta", fFin);
 
       const res = await fetch(`${API_URL}/citas/reporte_citas_global_paciente?${params.toString()}`, {
         headers: { Authorization: `Bearer ${localStorage.getItem("token")}` },
@@ -98,14 +139,16 @@ export default function ReporteCitas({ dataMaster, user }) {
     }
   };
 
-  const generarReporteGlobalOdontologos = async () => {
+  const generarReporteGlobalOdontologos = async (overrideInicio, overrideFin) => {
     setReportType("global_odontologos");
     setLoading(true);
     setErrorMessage("");
     try {
       const params = new URLSearchParams();
-      if (fechaInicio) params.append("fecha_desde", fechaInicio);
-      if (fechaFin) params.append("fecha_hasta", fechaFin);
+      const fInicio = (overrideInicio && typeof overrideInicio === 'string') ? overrideInicio : fechaInicio;
+      const fFin = (overrideFin && typeof overrideFin === 'string') ? overrideFin : fechaFin;
+      if (fInicio) params.append("fecha_desde", fInicio);
+      if (fFin) params.append("fecha_hasta", fFin);
 
       const res = await fetch(`${API_URL}/citas/reporte_citas_global_odontologos?${params.toString()}`, {
         headers: { Authorization: `Bearer ${localStorage.getItem("token")}` },
@@ -161,9 +204,10 @@ export default function ReporteCitas({ dataMaster, user }) {
     }
   };
 
-  const generarReporte = async () => {
-    const isPacienteSection = reportType === "pacientes" || reportType === "global";
-    const isOdontologoSection = reportType === "odontologos" || reportType === "global_odontologos";
+  const generarReporte = async (overrideInicio, overrideFin, overrideType) => {
+    const activeType = overrideType || reportType;
+    const isPacienteSection = activeType === "pacientes" || activeType === "global";
+    const isOdontologoSection = activeType === "odontologos" || activeType === "global_odontologos";
 
     if (isPacienteSection && !selectedPacienteId) {
       setErrorMessage(
@@ -181,7 +225,6 @@ export default function ReporteCitas({ dataMaster, user }) {
       return;
     }
 
-    // Restablecemos reportType al tipo individual correspondiente
     const targetType = isPacienteSection ? "pacientes" : "odontologos";
     setReportType(targetType);
 
@@ -189,20 +232,22 @@ export default function ReporteCitas({ dataMaster, user }) {
     setErrorMessage("");
     try {
       let url =
-        reportType === "pacientes"
+        targetType === "pacientes"
           ? `${API_URL}/citas/reporte_paciente`
           : `${API_URL}/citas/reporte_odontologo`;
 
       const params = new URLSearchParams();
 
-      if (reportType === "pacientes") {
+      if (targetType === "pacientes") {
         params.append("id_paciente", selectedPacienteId);
       } else {
         params.append("id_odontologo", selectedOdontologo);
       }
 
-      if (fechaInicio) params.append("fecha_agen_desde", fechaInicio);
-      if (fechaFin) params.append("fecha_agen_hasta", fechaFin);
+      const fInicio = (overrideInicio && typeof overrideInicio === 'string') ? overrideInicio : fechaInicio;
+      const fFin = (overrideFin && typeof overrideFin === 'string') ? overrideFin : fechaFin;
+      if (fInicio) params.append("fecha_agen_desde", fInicio);
+      if (fFin) params.append("fecha_agen_hasta", fFin);
       params.append("limit", 1000); // Para traer un historial amplio en el reporte
 
       const res = await fetch(`${url}?${params.toString()}`, {
@@ -483,9 +528,10 @@ export default function ReporteCitas({ dataMaster, user }) {
           </p>
         </div>
         <div className="flex gap-3">
+          <AsistenteVoz setActiveMenu={setActiveMenu} userRolId={user?.rol} />
           {(reportType === "pacientes" || reportType === "global") && (
             <button
-              onClick={generarReporteGlobal}
+              onClick={() => generarReporteGlobal()}
               disabled={loading}
               className={`flex items-center gap-2 px-5 py-3 bg-[#148F77] text-white text-sm font-bold rounded-xl transition-all shadow-sm ${
                 loading
@@ -498,7 +544,7 @@ export default function ReporteCitas({ dataMaster, user }) {
           )}
           {(reportType === "odontologos" || reportType === "global_odontologos") && (
             <button
-              onClick={generarReporteGlobalOdontologos}
+              onClick={() => generarReporteGlobalOdontologos()}
               disabled={loading}
               className={`flex items-center gap-2 px-5 py-3 bg-[#148F77] text-white text-sm font-bold rounded-xl transition-all shadow-sm ${
                 loading
@@ -510,7 +556,7 @@ export default function ReporteCitas({ dataMaster, user }) {
             </button>
           )}
           <button
-            onClick={generarReporte}
+            onClick={() => generarReporte()}
             disabled={loading}
             className={`flex items-center gap-2 px-6 py-3 bg-[#148F77] text-white text-sm font-bold rounded-xl transition-all shadow-sm ${
               loading
@@ -746,6 +792,12 @@ export default function ReporteCitas({ dataMaster, user }) {
                   Exportar a Excel
                 </button>
                 <button
+                  onClick={() => setIsMailModalOpen(true)}
+                  className="bg-orange-500 hover:bg-orange-600 text-white font-black text-[10px] uppercase tracking-widest px-5 py-3.5 rounded-xl transition-all shadow-md"
+                >
+                  Enviar por Correo
+                </button>
+                <button
                   onClick={() => window.print()}
                   className="bg-blue-600 hover:bg-blue-700 text-white font-black text-[10px] uppercase tracking-widest px-5 py-3.5 rounded-xl transition-all shadow-md"
                 >
@@ -948,6 +1000,15 @@ export default function ReporteCitas({ dataMaster, user }) {
               </p>
             </div>
           )}
+      <ModalEnviarCorreo
+        isOpen={isMailModalOpen}
+        onClose={() => setIsMailModalOpen(false)}
+        modulo="citas"
+        subtab={reportType}
+        fechaInicio={fechaInicio}
+        fechaFin={fechaFin}
+        prefilledEmails={prefilledEmails}
+      />
         </div>
       </div>
     </div>

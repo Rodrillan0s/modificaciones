@@ -50,4 +50,7 @@ def create_app():
         allow_headers=["Content-Type", "Authorization"]
     )
 
+    from .utils.scheduler import start_scheduler
+    start_scheduler(app)
+
     return app

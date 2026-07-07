@@ -32,6 +32,7 @@ import ReporteCitas from "../ModuloReportes/ReporteCitas";
 import ModuloConsultorios from "../../components/UIs/consultorios/ModuloConsultorios";
 import ModuloServicios from "../../components/UIs/servicios/ModuloServicios";
 import ModuloOdontograma from "../ModuloPacientes/ModuloOdontograma";
+import ProgramarCorreos from "../ModuloReportes/ProgramarCorreos";
 const API_URL = import.meta.env.VITE_API_URL;
 const ROLES = {
   ADMINISTRADOR: 1,
@@ -403,12 +404,12 @@ export default function Panel() {
 
           {/* REPORTES */}
           {activeMenu === "Reportes" && userRolId < 5 && (
-            <ReporteCitas dataMaster={dataMaster} user={user} />
+            <ReporteCitas dataMaster={dataMaster} user={user} setActiveMenu={setActiveMenu} />
           )}
 
           {/* NUEVOS REPORTES CENTRALIZADOS */}
           {activeMenu === "Reporte Citas" && userRolId < 5 && (
-            <ReporteCitas dataMaster={dataMaster} user={user} />
+            <ReporteCitas dataMaster={dataMaster} user={user} setActiveMenu={setActiveMenu} />
           )}
 
           {activeMenu === "Reporte Pacientes" && userRolId === ROLES.ADMINISTRADOR && (
@@ -425,6 +426,11 @@ export default function Panel() {
 
           {activeMenu === "Reporte Inventario" && userRolId === ROLES.ADMINISTRADOR && (
             <ReporteInventario dataMaster={dataMaster} user={user} setActiveMenu={setActiveMenu} />
+          )}
+
+          {/* PROGRAMAR CORREOS */}
+          {activeMenu === "Programar Correos" && userRolId === ROLES.ADMINISTRADOR && (
+            <ProgramarCorreos dataMaster={dataMaster} user={user} />
           )}
 
           {/* CONSULTORIOS */}
@@ -453,7 +459,7 @@ export default function Panel() {
             "Citas",
             "Gestionar Inventario",
             "Registrar Entradas",
-            "Registrar Salidas", // <-- Adición exclusiva: Desbloqueamos la vista de mermas y bajas
+            "Registrar Salidas", 
             "Ajustar Inventario",
             "Procedimientos",
             "Servicios",
@@ -468,6 +474,7 @@ export default function Panel() {
             "Reporte Inventario",
             "Reporte Finanzas",
             "Odontograma",
+            "Programar Correos",
           ].includes(activeMenu) && (
             <div className="h-full flex flex-col items-center justify-center opacity-20 text-center">
               <p className="text-4xl md:text-6xl mb-4">...</p>

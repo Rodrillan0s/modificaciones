@@ -368,6 +368,7 @@ export default function Sidebar({
                       <MenuButton title="Reporte Administración" label="Administracion" />
                       <MenuButton title="Reporte Inventario" label="Inventario" />
                       <MenuButton title="Reporte Finanzas" label="Finanzas" />
+                      <MenuButton title="Programar Correos" label="Programar Correos" />
                     </>
                   )}
                 </div>
